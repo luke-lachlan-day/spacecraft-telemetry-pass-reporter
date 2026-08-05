@@ -1,0 +1,72 @@
+{
+  "pass_id": "PASS-001",
+  "spacecraft": "AURORA-1",
+  "started_at": "2026-08-05T09:30:00+09:30",
+  "limits": {
+    "battery_voltage": {
+      "direction": "minimum",
+      "warning": 3.6,
+      "critical": 3.4
+    },
+    "temperature_c": {
+      "direction": "maximum",
+      "warning": 40.0,
+      "critical": 50.0
+    },
+    "signal_strength_dbm": {
+      "direction": "minimum",
+      "warning": -90.0,
+      "critical": -105.0
+    }
+  },
+  "readings": [
+    {
+      "timestamp": "2026-08-05T09:30:00+09:30",
+      "battery_voltage": 3.83,
+      "temperature_c": 25.8,
+      "signal_strength_dbm": -84.0
+    },
+    {
+      "timestamp": "2026-08-05T09:31:00+09:30",
+      "battery_voltage": 3.81,
+      "temperature_c": 27.2,
+      "signal_strength_dbm": -80.0
+    },
+    {
+      "timestamp": "2026-08-05T09:32:00+09:30",
+      "battery_voltage": 3.79,
+      "temperature_c": 29.6,
+      "signal_strength_dbm": -76.0
+    },
+    {
+      "timestamp": "2026-08-05T09:33:00+09:30",
+      "battery_voltage": 3.77,
+      "temperature_c": 31.1,
+      "signal_strength_dbm": -74.0
+    },
+    {
+      "timestamp": "2026-08-05T09:34:00+09:30",
+      "battery_voltage": 3.74,
+      "temperature_c": 32.4,
+      "signal_strength_dbm": -77.0
+    },
+    {
+      "timestamp": "2026-08-05T09:35:00+09:30",
+      "battery_voltage": 3.72,
+      "temperature_c": 31.7,
+      "signal_strength_dbm": -81.0
+    },
+    {
+      "timestamp": "2026-08-05T09:36:00+09:30",
+      "battery_voltage": 3.70,
+      "temperature_c": 29.3,
+      "signal_strength_dbm": -85.0
+    },
+    {
+      "timestamp": "2026-08-05T09:37:00+09:30",
+      "battery_voltage": 3.68,
+      "temperature_c": 27.1,
+      "signal_strength_dbm": -88.0
+    }
+  ]
+}

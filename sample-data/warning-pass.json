@@ -1,0 +1,84 @@
+{
+  "pass_id": "PASS-002",
+  "spacecraft": "KESTREL-DEMO",
+  "started_at": "2026-08-05T13:10:00+09:30",
+  "limits": {
+    "battery_voltage": {
+      "direction": "minimum",
+      "warning": 3.6,
+      "critical": 3.4
+    },
+    "temperature_c": {
+      "direction": "maximum",
+      "warning": 40.0,
+      "critical": 50.0
+    },
+    "signal_strength_dbm": {
+      "direction": "minimum",
+      "warning": -90.0,
+      "critical": -105.0
+    }
+  },
+  "readings": [
+    {
+      "timestamp": "2026-08-05T13:10:00+09:30",
+      "battery_voltage": 3.82,
+      "temperature_c": 26.0,
+      "signal_strength_dbm": -78.0
+    },
+    {
+      "timestamp": "2026-08-05T13:11:00+09:30",
+      "battery_voltage": 3.72,
+      "temperature_c": 31.0,
+      "signal_strength_dbm": -84.0
+    },
+    {
+      "timestamp": "2026-08-05T13:12:00+09:30",
+      "battery_voltage": 3.60,
+      "temperature_c": 36.0,
+      "signal_strength_dbm": -91.0
+    },
+    {
+      "timestamp": "2026-08-05T13:13:00+09:30",
+      "battery_voltage": 3.52,
+      "temperature_c": 40.0,
+      "signal_strength_dbm": -89.0
+    },
+    {
+      "timestamp": "2026-08-05T13:14:00+09:30",
+      "battery_voltage": 3.39,
+      "temperature_c": 45.0,
+      "signal_strength_dbm": -99.0
+    },
+    {
+      "timestamp": "2026-08-05T13:15:00+09:30",
+      "battery_voltage": 3.48,
+      "temperature_c": 50.0,
+      "signal_strength_dbm": -101.0
+    },
+    {
+      "timestamp": "2026-08-05T13:16:00+09:30",
+      "battery_voltage": 3.58,
+      "temperature_c": 43.0,
+      "signal_strength_dbm": -105.0
+    },
+    {
+      "timestamp": "2026-08-05T13:17:00+09:30",
+      "battery_voltage": 3.65,
+      "temperature_c": 39.0,
+      "signal_strength_dbm": -94.0
+    },
+    {
+      "timestamp": "2026-08-05T13:18:00+09:30",
+      "battery_voltage": 3.72,
+      "temperature_c": 35.0,
+      "signal_strength_dbm": -88.0
+    },
+    {
+      "timestamp": "2026-08-05T13:19:00+09:30",
+      "battery_voltage": 3.78,
+      "temperature_c": 30.0,
+      "signal_strength_dbm": -82.0
+    }
+  ]
+}

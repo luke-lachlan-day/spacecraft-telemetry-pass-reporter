@@ -1,0 +1,58 @@
+"""Command-line dependency wiring and user-facing error handling."""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from collections.abc import Sequence
+from pathlib import Path
+
+from jinja2 import TemplateError
+
+from telemetry_report import __version__
+from telemetry_report.data import TelemetryDataError, load_telemetry_pass
+from telemetry_report.presentation import render_report
+from telemetry_report.services import analyse_pass
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Create the argument parser used by the reporter CLI."""
+    parser = argparse.ArgumentParser(
+        prog="telemetry-report",
+        description="Generate an HTML report from fictional spacecraft-pass telemetry.",
+    )
+    parser.add_argument("input", type=Path, help="path to the telemetry JSON file")
+    parser.add_argument(
+        "--output",
+        "-o",
+        type=Path,
+        help="report path (default: <input-name>-report.html beside the input)",
+    )
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+    return parser
+
+
+def _default_output(input_path: Path) -> Path:
+    return input_path.with_name(f"{input_path.stem}-report.html")
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """Run the report pipeline and return a process exit code."""
+    arguments = build_parser().parse_args(argv)
+    output_path = arguments.output or _default_output(arguments.input)
+
+    try:
+        telemetry_pass = load_telemetry_pass(arguments.input)
+        analysis = analyse_pass(telemetry_pass)
+        html = render_report(analysis)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(html, encoding="utf-8")
+    except TelemetryDataError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
+    except (OSError, TemplateError) as error:
+        print(f"error: could not generate '{output_path}': {error}", file=sys.stderr)
+        return 3
+
+    print(f"Generated telemetry report: {output_path.resolve()}")
+    return 0
