@@ -12,7 +12,7 @@ boundaries, typed data, deterministic rules, actionable errors, and automated ve
 Two generated examples are included:
 
 - [`examples/nominal-pass-report.html`](examples/nominal-pass-report.html)
-- [`examples/warning-pass-report.html`](examples/warning-pass-report.html)
+- [`examples/anomalous-pass-report.html`](examples/anomalous-pass-report.html)
 
 ## Architecture
 
@@ -20,7 +20,7 @@ The package deliberately uses four small layers, wired together by a small CLI:
 
 - **Data** validates untrusted JSON with Pydantic v2 and maps it into domain objects.
 - **Domain** defines immutable telemetry, limit, status, and analysis value objects.
-- **Services** applies pure threshold rules and calculates events, counts, and statistics.
+- **Services** applies pure threshold rules and calculates occurrences, counts, and statistics.
 - **Presentation** builds an escaped view model and renders it with a Jinja2 HTML template.
 - **CLI** wires those pieces together, handles expected failures, and writes the result.
 
@@ -86,8 +86,8 @@ python -m pip install -e ".[dev]"
 Run the module directly:
 
 ```bash
-python -m telemetry_report sample-data/warning-pass.json \
-  --output examples/warning-pass-report.html
+python -m telemetry_report sample-data/anomalous-pass.json \
+  --output examples/anomalous-pass-report.html
 ```
 
 The installed console command is equivalent:
@@ -97,8 +97,11 @@ telemetry-report sample-data/nominal-pass.json --output examples/nominal-pass-re
 ```
 
 When `--output` is omitted, the reporter writes `<input-stem>-report.html` beside the input file.
-The immediate output path is created when needed. Success returns exit code `0`; invalid input and
-output failures return non-zero codes with concise messages on standard error.
+The destination directory is created when needed. Input and output must identify different files,
+including through path aliases, symbolic links, or hard links. Reports are written with an atomic
+replacement so a failed write does not damage an existing report. Success returns exit code `0`;
+invalid input and unsafe path combinations return `2`; output failures return `3`, with concise
+messages on standard error.
 
 ## Input format
 
@@ -126,9 +129,10 @@ timestamped reading:
 }
 ```
 
-All timestamps must include a UTC offset. Readings must be non-empty, unique, and strictly
-chronological. `started_at` must equal the first reading timestamp. Numeric values must be finite,
-and unknown fields are rejected.
+Input files must be UTF-8 encoded. Timestamps must be ISO 8601 strings that include a UTC offset;
+numeric epoch timestamps are rejected. Readings must be non-empty, unique, and strictly
+chronological, and `started_at` must equal the first reading timestamp. Numeric values must be
+finite JSON numbers: booleans and numeric strings are rejected. Unknown fields are also rejected.
 
 For a `minimum` rule, values at or below the warning threshold are warnings and values at or below
 critical are critical. For a `maximum` rule, values at or above warning are warnings and values at
@@ -160,12 +164,17 @@ suite on Python 3.11, 3.12, 3.13, and 3.14.
   unnecessary for this project's scope.
 - **Threshold equality is unsafe-side inclusive.** Exact boundaries consistently become warning or
   critical, avoiding ambiguous edge behaviour.
-- **Events are metric-level.** One reading may produce several chronological events, making the
-  report explain which individual measurements caused its aggregate severity.
+- **Occurrences are metric-level.** Each unsafe metric sample produces one chronological
+  out-of-limit occurrence. These are observations at each timestamp, not only state-transition
+  events such as entry, escalation, or recovery.
 - **Rendering is self-contained.** Embedded CSS makes reports portable and offline-friendly. There
   is no JavaScript, external font, CDN, database, or network dependency.
+- **Measurement precision is preserved.** Reports use a consistent minimum precision for each
+  metric and retain additional meaningful digits from readings and configured thresholds.
 - **Statistics are descriptive.** Minimum, maximum, and arithmetic mean are useful for demonstration
   but do not model sensor uncertainty, sampling gaps, calibration, or operational trend analysis.
+  Signal-strength average is the arithmetic mean of dBm samples; because dBm is logarithmic, this
+  is not equivalent to averaging received power.
 
 ## Scope limitations
 

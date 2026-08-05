@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
-from typing import Generic, TypeVar
+from typing import Generic, TypeVar, assert_never
 
 
 class Status(StrEnum):
@@ -52,7 +52,7 @@ class MetricValues(Generic[T]):
     signal_strength_dbm: T
 
     def items(self) -> tuple[tuple[TelemetryMetric, T], ...]:
-        """Return values in the stable order used by reports and events."""
+        """Return values in the stable order used by reports and occurrences."""
         return (
             (TelemetryMetric.BATTERY_VOLTAGE, self.battery_voltage),
             (TelemetryMetric.TEMPERATURE_C, self.temperature_c),
@@ -61,11 +61,14 @@ class MetricValues(Generic[T]):
 
     def for_metric(self, metric: TelemetryMetric) -> T:
         """Return the value associated with ``metric``."""
-        if metric is TelemetryMetric.BATTERY_VOLTAGE:
-            return self.battery_voltage
-        if metric is TelemetryMetric.TEMPERATURE_C:
-            return self.temperature_c
-        return self.signal_strength_dbm
+        match metric:
+            case TelemetryMetric.BATTERY_VOLTAGE:
+                return self.battery_voltage
+            case TelemetryMetric.TEMPERATURE_C:
+                return self.temperature_c
+            case TelemetryMetric.SIGNAL_STRENGTH_DBM:
+                return self.signal_strength_dbm
+        assert_never(metric)
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,8 +118,8 @@ class ReadingAnalysis:
 
 
 @dataclass(frozen=True, slots=True)
-class TelemetryEvent:
-    """A warning or critical metric occurrence in chronological order."""
+class OutOfLimitOccurrence:
+    """One warning or critical metric sample in chronological order."""
 
     timestamp: datetime
     metric: TelemetryMetric
@@ -145,7 +148,7 @@ class PassAnalysis:
     telemetry_pass: TelemetryPass
     overall_status: Status
     readings: tuple[ReadingAnalysis, ...]
-    events: tuple[TelemetryEvent, ...]
+    occurrences: tuple[OutOfLimitOccurrence, ...]
     statistics: MetricValues[MetricStatistics]
     counts: StatusCounts
     operational_summary: str

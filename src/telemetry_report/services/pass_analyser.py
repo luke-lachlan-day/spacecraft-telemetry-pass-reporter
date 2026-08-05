@@ -9,11 +9,11 @@ from telemetry_report.domain.models import (
     MetricStatistics,
     MetricValues,
     OperatingLimit,
+    OutOfLimitOccurrence,
     PassAnalysis,
     ReadingAnalysis,
     Status,
     StatusCounts,
-    TelemetryEvent,
     TelemetryMetric,
     TelemetryPass,
     TelemetryReading,
@@ -67,20 +67,20 @@ def _statistics(readings: tuple[TelemetryReading, ...]) -> MetricValues[MetricSt
     )
 
 
-def _events(readings: tuple[ReadingAnalysis, ...]) -> tuple[TelemetryEvent, ...]:
-    events: list[TelemetryEvent] = []
+def _occurrences(readings: tuple[ReadingAnalysis, ...]) -> tuple[OutOfLimitOccurrence, ...]:
+    occurrences: list[OutOfLimitOccurrence] = []
     for reading_result in readings:
         for metric, status in reading_result.metric_statuses.items():
             if status is not Status.NOMINAL:
-                events.append(
-                    TelemetryEvent(
+                occurrences.append(
+                    OutOfLimitOccurrence(
                         timestamp=reading_result.reading.timestamp,
                         metric=metric,
                         value=reading_result.reading.values.for_metric(metric),
                         status=status,
                     )
                 )
-    return tuple(events)
+    return tuple(occurrences)
 
 
 def _counts(readings: tuple[ReadingAnalysis, ...]) -> StatusCounts:
@@ -91,22 +91,22 @@ def _counts(readings: tuple[ReadingAnalysis, ...]) -> StatusCounts:
     )
 
 
-def _summary(counts: StatusCounts, events: tuple[TelemetryEvent, ...]) -> str:
-    critical_events = sum(event.status is Status.CRITICAL for event in events)
-    warning_events = sum(event.status is Status.WARNING for event in events)
+def _summary(counts: StatusCounts, occurrences: tuple[OutOfLimitOccurrence, ...]) -> str:
+    critical_occurrences = sum(occurrence.status is Status.CRITICAL for occurrence in occurrences)
+    warning_occurrences = sum(occurrence.status is Status.WARNING for occurrence in occurrences)
     reading_word = "reading" if counts.total == 1 else "readings"
-    event_word = "event" if len(events) == 1 else "events"
+    occurrence_word = "occurrence" if len(occurrences) == 1 else "occurrences"
     if counts.critical:
         return (
             f"Critical conditions occurred in {counts.critical} of {counts.total} {reading_word}. "
-            f"The event timeline contains {critical_events} critical and {warning_events} warning "
-            f"metric {event_word} for review."
+            f"The out-of-limit timeline contains {critical_occurrences} critical and "
+            f"{warning_occurrences} warning metric {occurrence_word} for review."
         )
     if counts.warning:
         return (
             f"No critical conditions were detected. {counts.warning} of {counts.total} "
-            f"{reading_word} entered warning ranges, producing {warning_events} warning metric "
-            f"{event_word}."
+            f"{reading_word} entered warning ranges, producing {warning_occurrences} warning "
+            f"metric {occurrence_word}."
         )
     if counts.total == 1:
         return "The single reading remained within the configured nominal operating ranges."
@@ -121,7 +121,7 @@ def analyse_pass(telemetry_pass: TelemetryPass) -> PassAnalysis:
     reading_results = tuple(
         _analyse_reading(reading, telemetry_pass.limits) for reading in telemetry_pass.readings
     )
-    events = _events(reading_results)
+    occurrences = _occurrences(reading_results)
     counts = _counts(reading_results)
     overall_status = max(
         (reading.status for reading in reading_results), key=lambda status: status.rank
@@ -131,8 +131,8 @@ def analyse_pass(telemetry_pass: TelemetryPass) -> PassAnalysis:
         telemetry_pass=telemetry_pass,
         overall_status=overall_status,
         readings=reading_results,
-        events=events,
+        occurrences=occurrences,
         statistics=_statistics(telemetry_pass.readings),
         counts=counts,
-        operational_summary=_summary(counts, events),
+        operational_summary=_summary(counts, occurrences),
     )

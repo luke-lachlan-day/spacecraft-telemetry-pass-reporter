@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 
 from jinja2 import Environment, PackageLoader, StrictUndefined, select_autoescape
 
@@ -21,6 +22,7 @@ class MetricPresentation:
     label: str
     unit: str
     decimals: int
+    average_note: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,14 +33,12 @@ class MetricSummaryView:
     maximum: str
     average: str
     direction: str
-    warning: str
-    critical: str
     threshold_description: str
+    average_note: str | None
 
 
 @dataclass(frozen=True, slots=True)
 class MetricCellView:
-    label: str
     unit: str
     value: str
     status: str
@@ -54,7 +54,7 @@ class ReadingRowView:
 
 
 @dataclass(frozen=True, slots=True)
-class EventView:
+class OccurrenceView:
     timestamp: str
     metric_label: str
     value: str
@@ -76,19 +76,34 @@ class ReportView:
     warning_count: int
     critical_count: int
     metric_summaries: tuple[MetricSummaryView, ...]
-    events: tuple[EventView, ...]
+    occurrences: tuple[OccurrenceView, ...]
     readings: tuple[ReadingRowView, ...]
 
 
 METRICS = (
     MetricPresentation(TelemetryMetric.BATTERY_VOLTAGE, "Battery voltage", "V", 2),
     MetricPresentation(TelemetryMetric.TEMPERATURE_C, "Temperature", "°C", 1),
-    MetricPresentation(TelemetryMetric.SIGNAL_STRENGTH_DBM, "Signal strength", "dBm", 1),
+    MetricPresentation(
+        TelemetryMetric.SIGNAL_STRENGTH_DBM,
+        "Signal strength",
+        "dBm",
+        1,
+        "Average is the arithmetic mean of dBm samples; it is not equivalent to averaging "
+        "received power.",
+    ),
 )
+METRICS_BY_METRIC = {metric.metric: metric for metric in METRICS}
 
 
 def _format_number(value: float, decimals: int) -> str:
     return f"{value:.{decimals}f}"
+
+
+def _format_measurement(value: float, minimum_decimals: int) -> str:
+    exponent = Decimal(str(value)).as_tuple().exponent
+    if not isinstance(exponent, int):
+        return _format_number(value, minimum_decimals)
+    return _format_number(value, max(minimum_decimals, -exponent))
 
 
 def _format_timestamp(value: datetime) -> str:
@@ -96,8 +111,8 @@ def _format_timestamp(value: datetime) -> str:
 
 
 def _threshold_description(limit: OperatingLimit, metric: MetricPresentation) -> str:
-    warning = _format_number(limit.warning, metric.decimals)
-    critical = _format_number(limit.critical, metric.decimals)
+    warning = _format_measurement(limit.warning, metric.decimals)
+    critical = _format_measurement(limit.critical, metric.decimals)
     if limit.direction is LimitDirection.MINIMUM:
         return (
             f"Warning at or below {warning} {metric.unit}; "
@@ -119,13 +134,12 @@ def _build_view(analysis: PassAnalysis) -> ReportView:
             MetricSummaryView(
                 label=metric.label,
                 unit=metric.unit,
-                minimum=_format_number(statistics.minimum, metric.decimals),
-                maximum=_format_number(statistics.maximum, metric.decimals),
+                minimum=_format_measurement(statistics.minimum, metric.decimals),
+                maximum=_format_measurement(statistics.maximum, metric.decimals),
                 average=_format_number(statistics.average, metric.decimals),
                 direction=limit.direction.value,
-                warning=_format_number(limit.warning, metric.decimals),
-                critical=_format_number(limit.critical, metric.decimals),
                 threshold_description=_threshold_description(limit, metric),
+                average_note=metric.average_note,
             )
         )
 
@@ -133,9 +147,8 @@ def _build_view(analysis: PassAnalysis) -> ReportView:
     for result in analysis.readings:
         cells = tuple(
             MetricCellView(
-                label=metric.label,
                 unit=metric.unit,
-                value=_format_number(
+                value=_format_measurement(
                     result.reading.values.for_metric(metric.metric), metric.decimals
                 ),
                 status=result.metric_statuses.for_metric(metric.metric).value,
@@ -152,20 +165,19 @@ def _build_view(analysis: PassAnalysis) -> ReportView:
             )
         )
 
-    events = tuple(
-        EventView(
-            timestamp=_format_timestamp(event.timestamp),
-            metric_label=next(metric.label for metric in METRICS if metric.metric is event.metric),
-            value=_format_number(
-                event.value,
-                next(metric.decimals for metric in METRICS if metric.metric is event.metric),
-            ),
-            unit=next(metric.unit for metric in METRICS if metric.metric is event.metric),
-            status=event.status.value,
-            status_label=event.status.value.title(),
+    occurrences: list[OccurrenceView] = []
+    for occurrence in analysis.occurrences:
+        metric = METRICS_BY_METRIC[occurrence.metric]
+        occurrences.append(
+            OccurrenceView(
+                timestamp=_format_timestamp(occurrence.timestamp),
+                metric_label=metric.label,
+                value=_format_measurement(occurrence.value, metric.decimals),
+                unit=metric.unit,
+                status=occurrence.status.value,
+                status_label=occurrence.status.value.title(),
+            )
         )
-        for event in analysis.events
-    )
 
     return ReportView(
         pass_id=telemetry_pass.pass_id,
@@ -179,7 +191,7 @@ def _build_view(analysis: PassAnalysis) -> ReportView:
         warning_count=analysis.counts.warning,
         critical_count=analysis.counts.critical,
         metric_summaries=tuple(metric_summaries),
-        events=events,
+        occurrences=tuple(occurrences),
         readings=tuple(reading_rows),
     )
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import cast
 
 import pytest
 
@@ -84,19 +85,21 @@ def test_analysis_calculates_summary_statistics(
     assert temperature.average == pytest.approx(30.0)
 
 
-def test_events_are_chronological_and_use_stable_metric_order(
+def test_occurrences_are_chronological_and_use_stable_metric_order(
     pass_factory: Callable[[tuple[tuple[float, float, float], ...], str, str], TelemetryPass],
 ) -> None:
     result = analyse_pass(pass_factory(((3.8, 40.0, -91.0), (3.4, 50.0, -105.0))))
 
-    assert [(event.metric, event.status) for event in result.events] == [
+    assert [(occurrence.metric, occurrence.status) for occurrence in result.occurrences] == [
         (TelemetryMetric.TEMPERATURE_C, Status.WARNING),
         (TelemetryMetric.SIGNAL_STRENGTH_DBM, Status.WARNING),
         (TelemetryMetric.BATTERY_VOLTAGE, Status.CRITICAL),
         (TelemetryMetric.TEMPERATURE_C, Status.CRITICAL),
         (TelemetryMetric.SIGNAL_STRENGTH_DBM, Status.CRITICAL),
     ]
-    assert list(result.events) == sorted(result.events, key=lambda event: event.timestamp)
+    assert list(result.occurrences) == sorted(
+        result.occurrences, key=lambda occurrence: occurrence.timestamp
+    )
 
 
 def test_nominal_and_warning_summaries_are_deterministic(
@@ -110,7 +113,7 @@ def test_nominal_and_warning_summaries_are_deterministic(
     )
     assert warning.operational_summary == (
         "No critical conditions were detected. 1 of 1 reading entered warning ranges, "
-        "producing 1 warning metric event."
+        "producing 1 warning metric occurrence."
     )
 
 
@@ -127,3 +130,10 @@ def test_metric_values_can_be_addressed_by_metric() -> None:
     assert values.for_metric(TelemetryMetric.BATTERY_VOLTAGE) == 1
     assert values.for_metric(TelemetryMetric.TEMPERATURE_C) == 2
     assert values.for_metric(TelemetryMetric.SIGNAL_STRENGTH_DBM) == 3
+
+
+def test_metric_values_reject_unknown_metric_at_runtime() -> None:
+    values = MetricValues(battery_voltage=1, temperature_c=2, signal_strength_dbm=3)
+
+    with pytest.raises(AssertionError):
+        values.for_metric(cast(TelemetryMetric, "unsupported"))

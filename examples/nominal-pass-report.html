@@ -165,10 +165,11 @@
     .stat-list dt { color: var(--muted); font-size: 0.72rem; font-weight: 700; text-transform: uppercase; }
     .stat-list dd { margin: 2px 0 0; font-size: 1.05rem; font-weight: 750; }
 
-    .threshold { margin: 0; color: var(--muted); font-size: 0.82rem; }
+    .threshold, .stat-note { margin: 0; color: var(--muted); font-size: 0.82rem; }
+    .stat-note { margin-top: 8px; }
 
-    .event-list { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
-    .event-item {
+    .occurrence-list { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+    .occurrence-item {
       display: grid;
       grid-template-columns: auto minmax(150px, 1fr) minmax(190px, 1.4fr);
       gap: 14px;
@@ -178,12 +179,12 @@
       border-left-width: 4px;
       border-radius: 8px;
     }
-    .event-item.warning { border-left-color: var(--warning); }
-    .event-item.critical { border-left-color: var(--critical); }
-    .event-item::before { content: none; }
-    .event-time { color: var(--muted); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 0.82rem; }
-    .event-value { font-weight: 750; }
-    .empty-events { padding: 20px; border: 1px dashed #9bb1c0; border-radius: 8px; color: var(--muted); background: var(--surface-alt); }
+    .occurrence-item.warning { border-left-color: var(--warning); }
+    .occurrence-item.critical { border-left-color: var(--critical); }
+    .occurrence-item::before { content: none; }
+    .occurrence-time { color: var(--muted); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 0.82rem; }
+    .occurrence-value { font-weight: 750; }
+    .empty-occurrences { padding: 20px; border: 1px dashed #9bb1c0; border-radius: 8px; color: var(--muted); background: var(--surface-alt); }
 
     .table-wrapper { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; }
     table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
@@ -226,7 +227,7 @@
       .identity { grid-template-columns: 1fr; }
       .summary-panel, .metric-grid { grid-template-columns: minmax(0, 1fr); }
       .summary-panel > *, .metric-card { min-width: 0; }
-      .event-item { grid-template-columns: 1fr; gap: 3px; }
+      .occurrence-item { grid-template-columns: 1fr; gap: 3px; }
     }
 
     @media print {
@@ -234,7 +235,7 @@
       .page { width: 100%; margin: 0; border: 0; box-shadow: none; }
       header { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
       .table-wrapper { overflow: visible; }
-      tr, .metric-card, .event-item { break-inside: avoid; }
+      tr, .metric-card, .occurrence-item { break-inside: avoid; }
     }
   </style>
 </head>
@@ -312,13 +313,14 @@
               <div><dt>Maximum</dt><dd>-74.0</dd></div>
             </dl>
             <p class="threshold"><strong>Minimum rule:</strong> Warning at or below -90.0 dBm; critical at or below -105.0 dBm.</p>
+            <p class="stat-note">Average is the arithmetic mean of dBm samples; it is not equivalent to averaging received power.</p>
           </article>
         </div>
       </section>
 
-      <section aria-labelledby="events-heading">
-        <h2 id="events-heading">Warning and critical events</h2>
-        <p class="empty-events">No warning or critical metric events were recorded during this pass.</p>
+      <section aria-labelledby="occurrences-heading">
+        <h2 id="occurrences-heading">Out-of-limit occurrences</h2>
+        <p class="empty-occurrences">No out-of-limit metric occurrences were recorded during this pass.</p>
       </section>
 
       <section aria-labelledby="readings-heading">
