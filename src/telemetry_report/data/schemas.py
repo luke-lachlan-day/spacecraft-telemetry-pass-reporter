@@ -19,7 +19,7 @@ from telemetry_report.domain.models import (
 class InputModel(BaseModel):
     """Strict base configuration shared by all input schemas."""
 
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
 
 
 class LimitSchema(InputModel):

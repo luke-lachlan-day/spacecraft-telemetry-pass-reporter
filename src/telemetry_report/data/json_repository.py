@@ -26,6 +26,10 @@ def load_telemetry_pass(path: Path) -> TelemetryPass:
     """Read ``path``, validate its JSON, and return immutable domain data."""
     try:
         raw_input = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as error:
+        raise TelemetryDataError(
+            f"invalid telemetry data in '{path}': file must be UTF-8 encoded"
+        ) from error
     except OSError as error:
         raise TelemetryDataError(f"could not read '{path}': {error}") from error
 

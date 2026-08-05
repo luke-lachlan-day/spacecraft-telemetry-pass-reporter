@@ -31,6 +31,14 @@ def test_load_reports_missing_file_without_leaking_os_exception(tmp_path: Path) 
         load_telemetry_pass(tmp_path / "missing.json")
 
 
+def test_load_reports_invalid_utf8_as_data_error(tmp_path: Path) -> None:
+    input_path = tmp_path / "invalid-encoding.json"
+    input_path.write_bytes(b"\xff\xfe")
+
+    with pytest.raises(TelemetryDataError, match="file must be UTF-8 encoded"):
+        load_telemetry_pass(input_path)
+
+
 @pytest.mark.parametrize("content", ["{not json", "[]", "{}"])
 def test_load_reports_malformed_or_wrongly_shaped_json(tmp_path: Path, content: str) -> None:
     input_path = tmp_path / "invalid.json"
@@ -115,9 +123,9 @@ def test_load_rejects_invalid_timelines(
         load_telemetry_pass(input_path)
 
 
-@pytest.mark.parametrize("bad_value", ["NaN", "Infinity", "-Infinity"])
+@pytest.mark.parametrize("bad_value", [float("nan"), float("inf"), float("-inf")])
 def test_load_rejects_non_finite_measurements(
-    tmp_path: Path, valid_payload: dict[str, object], bad_value: str
+    tmp_path: Path, valid_payload: dict[str, object], bad_value: float
 ) -> None:
     payload = copy.deepcopy(valid_payload)
     readings = payload["readings"]
@@ -129,6 +137,50 @@ def test_load_rejects_non_finite_measurements(
 
     with pytest.raises(TelemetryDataError, match="finite number"):
         load_telemetry_pass(input_path)
+
+
+@pytest.mark.parametrize("mutation", ["boolean", "numeric_string", "string_limit", "epoch"])
+def test_load_rejects_coerced_json_types(
+    tmp_path: Path, valid_payload: dict[str, object], mutation: str
+) -> None:
+    payload = copy.deepcopy(valid_payload)
+    readings = payload["readings"]
+    limits = payload["limits"]
+    assert isinstance(readings, list)
+    assert isinstance(readings[0], dict)
+    assert isinstance(limits, dict)
+    assert isinstance(limits["battery_voltage"], dict)
+
+    if mutation == "boolean":
+        readings[0]["battery_voltage"] = True
+    elif mutation == "numeric_string":
+        readings[0]["temperature_c"] = "27.5"
+    elif mutation == "string_limit":
+        limits["battery_voltage"]["warning"] = "3.6"
+    else:
+        payload["started_at"] = 1_785_886_200
+        readings[0]["timestamp"] = 1_785_886_200
+
+    input_path = tmp_path / "coerced-value.json"
+    _write_payload(input_path, payload)
+
+    with pytest.raises(TelemetryDataError, match="invalid telemetry data"):
+        load_telemetry_pass(input_path)
+
+
+def test_load_accepts_integer_json_numbers(
+    tmp_path: Path, valid_payload: dict[str, object]
+) -> None:
+    readings = valid_payload["readings"]
+    assert isinstance(readings, list)
+    assert isinstance(readings[0], dict)
+    readings[0]["temperature_c"] = 27
+    input_path = tmp_path / "integer-value.json"
+    _write_payload(input_path, valid_payload)
+
+    telemetry_pass = load_telemetry_pass(input_path)
+
+    assert telemetry_pass.readings[0].values.temperature_c == 27.0
 
 
 def test_load_rejects_unknown_fields(tmp_path: Path, valid_payload: dict[str, object]) -> None:

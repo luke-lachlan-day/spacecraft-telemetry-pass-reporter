@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from collections.abc import Sequence
+from contextlib import suppress
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 
 from jinja2 import TemplateError
 
@@ -36,17 +39,54 @@ def _default_output(input_path: Path) -> Path:
     return input_path.with_name(f"{input_path.stem}-report.html")
 
 
+def _paths_refer_to_same_file(input_path: Path, output_path: Path) -> bool:
+    try:
+        if input_path.resolve() == output_path.resolve():
+            return True
+    except (OSError, RuntimeError):
+        pass
+
+    try:
+        return input_path.samefile(output_path)
+    except OSError:
+        return False
+
+
+def _write_report_atomically(output_path: Path, html: str) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path: Path | None = None
+    try:
+        with NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=output_path.parent,
+            prefix=f".{output_path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary_file:
+            temporary_path = Path(temporary_file.name)
+            temporary_file.write(html)
+        os.replace(temporary_path, output_path)
+    finally:
+        if temporary_path is not None:
+            with suppress(OSError):
+                temporary_path.unlink(missing_ok=True)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the report pipeline and return a process exit code."""
     arguments = build_parser().parse_args(argv)
     output_path = arguments.output or _default_output(arguments.input)
 
+    if _paths_refer_to_same_file(arguments.input, output_path):
+        print("error: input and output paths must refer to different files", file=sys.stderr)
+        return 2
+
     try:
         telemetry_pass = load_telemetry_pass(arguments.input)
         analysis = analyse_pass(telemetry_pass)
         html = render_report(analysis)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(html, encoding="utf-8")
+        _write_report_atomically(output_path, html)
     except TelemetryDataError as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
