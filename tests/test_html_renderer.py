@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import replace
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -85,6 +86,43 @@ def test_report_preserves_additional_measurement_and_threshold_precision(
     assert "<dt>Minimum</dt><dd>3.4005</dd>" in html
     assert "<dt>Average</dt><dd>3.50</dd>" in html
     assert "<dt>Maximum</dt><dd>3.6005</dd>" in html
+
+
+def test_report_preserves_fractional_timestamps_across_all_sections(
+    pass_factory: Callable[[tuple[tuple[float, float, float], ...], str, str], TelemetryPass],
+) -> None:
+    telemetry_pass = pass_factory(((3.6, 25.0, -80.0), (3.4, 25.0, -80.0)))
+    first_timestamp = telemetry_pass.started_at + timedelta(microseconds=100_000)
+    second_timestamp = telemetry_pass.started_at + timedelta(microseconds=900_000)
+    readings = (
+        replace(telemetry_pass.readings[0], timestamp=first_timestamp),
+        replace(telemetry_pass.readings[1], timestamp=second_timestamp),
+    )
+    telemetry_pass = replace(telemetry_pass, started_at=first_timestamp, readings=readings)
+
+    html = render_report(analyse_pass(telemetry_pass))
+
+    assert html.count("2026-08-05T09:30:00.100000+09:30") == 3
+    assert html.count("2026-08-05T09:30:00.900000+09:30") == 2
+
+
+@pytest.mark.parametrize(
+    ("value", "measurement", "average"),
+    [
+        (1e308, "1e+308 V", "1.00e+308"),
+        (1e-308, "1e-308 V", "1.00e-308"),
+    ],
+)
+def test_report_uses_compact_scientific_notation_for_extreme_values(
+    pass_factory: Callable[[tuple[tuple[float, float, float], ...], str, str], TelemetryPass],
+    value: float,
+    measurement: str,
+    average: str,
+) -> None:
+    html = render_report(analyse_pass(pass_factory(((value, 25.0, -80.0),))))
+
+    assert measurement in html
+    assert f"<dt>Average</dt><dd>{average}</dd>" in html
 
 
 @pytest.mark.parametrize(

@@ -182,11 +182,28 @@
     .occurrence-item.warning { border-left-color: var(--warning); }
     .occurrence-item.critical { border-left-color: var(--critical); }
     .occurrence-item::before { content: none; }
+    .occurrence-item .table-status { justify-self: start; }
     .occurrence-time { color: var(--muted); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 0.82rem; }
     .occurrence-value { font-weight: 750; }
     .empty-occurrences { padding: 20px; border: 1px dashed #9bb1c0; border-radius: 8px; color: var(--muted); background: var(--surface-alt); }
 
-    .table-wrapper { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; }
+    .summary-panel, .count-grid, .metric-grid, .stat-list, .occurrence-list, .table-wrapper {
+      min-width: 0;
+      max-width: 100%;
+    }
+    .operational-summary, .count-card, .metric-card, .stat-list > div, .occurrence-item {
+      min-width: 0;
+    }
+    .operational-summary, .threshold, .stat-note, .occurrence-item > *, .empty-occurrences, caption {
+      overflow-wrap: anywhere;
+    }
+
+    .table-wrapper {
+      overflow-x: auto;
+      overscroll-behavior-inline: contain;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+    }
     table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
     caption { padding: 13px 16px; color: var(--muted); background: var(--surface-alt); text-align: left; font-size: 0.84rem; }
     th, td { padding: 12px 14px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }
@@ -221,13 +238,45 @@
     footer p { margin: 0; }
 
     @media (max-width: 820px) {
-      .page { width: min(100% - 20px, 1180px); margin: 10px auto; border-radius: 10px; }
+      .page { width: calc(100% - 20px); max-width: 1180px; margin: 10px auto; border-radius: 10px; }
       header, main { padding-left: 22px; padding-right: 22px; }
       .header-grid { align-items: start; flex-direction: column; }
       .identity { grid-template-columns: 1fr; }
       .summary-panel, .metric-grid { grid-template-columns: minmax(0, 1fr); }
       .summary-panel > *, .metric-card { min-width: 0; }
       .occurrence-item { grid-template-columns: 1fr; gap: 3px; }
+    }
+
+    @media (max-width: 480px) {
+      .page {
+        width: 100%;
+        margin: 0;
+        border-width: 0;
+        border-radius: 0;
+        box-shadow: none;
+      }
+      header { padding: 28px 16px 24px; }
+      main { padding: 28px 16px 32px; }
+      footer { padding: 18px 16px; }
+      section + section { margin-top: 32px; }
+      .operational-summary { padding: 18px; }
+      .count-grid, .stat-list { grid-template-columns: minmax(0, 1fr); }
+      .count-card {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        padding: 12px;
+      }
+      .count-card strong { font-size: 1.4rem; }
+      .metric-card { padding: 16px; }
+      .stat-list { gap: 6px; margin: 14px 0; }
+      .stat-list div {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+      }
     }
 
     @media print {
@@ -327,9 +376,9 @@
             <thead>
               <tr>
                 <th scope="col">Timestamp</th>
-                <th scope="col">Battery voltage (V)</th>
-                <th scope="col">Temperature (°C)</th>
-                <th scope="col">Signal strength (dBm)</th>
+                {% for metric in report.metric_summaries %}
+                <th scope="col">{{ metric.label }} ({{ metric.unit }})</th>
+                {% endfor %}
                 <th scope="col">Reading status</th>
               </tr>
             </thead>

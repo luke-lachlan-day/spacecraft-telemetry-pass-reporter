@@ -112,7 +112,8 @@ The destination directory is created when needed. Input and output must identify
 including through path aliases, symbolic links, or hard links. Reports are written with an atomic
 replacement so a failed write does not damage an existing report. Success returns exit code `0`;
 invalid input and unsafe path combinations return `2`; output failures return `3`, with concise
-messages on standard error.
+messages on standard error. On POSIX systems, new reports use normal file-creation permissions
+filtered through the process umask, while replacing an existing regular report preserves its mode.
 
 ## Input format
 
@@ -145,7 +146,7 @@ numeric epoch timestamps are rejected. Readings must be non-empty, unique, and s
 chronological, and `started_at` must equal the first reading timestamp. Numeric values must be
 finite JSON numbers: booleans and numeric strings are rejected. Unknown fields are also rejected.
 Input files may be at most 5 MiB (5,242,880 bytes), and each pass may contain at most 10,000
-readings.
+readings. Fractional timestamp seconds are accepted and preserved in generated reports.
 
 For a `minimum` rule, values at or below the warning threshold are warnings and values at or below
 critical are critical. For a `maximum` rule, values at or above warning are warnings and values at
@@ -183,9 +184,11 @@ command reproduces the checked-in anomalous report.
   out-of-limit occurrence. These are observations at each timestamp, not only state-transition
   events such as entry, escalation, or recovery.
 - **Rendering is self-contained.** Embedded CSS makes reports portable and offline-friendly. There
-  is no JavaScript, external font, CDN, database, or network dependency.
+  is no JavaScript, external font, CDN, database, or network dependency. Dense panels reflow on
+  narrow screens, while the chronological table keeps any horizontal scrolling within its frame.
 - **Measurement precision is preserved.** Reports use a consistent minimum precision for each
-  metric and retain additional meaningful digits from readings and configured thresholds.
+  metric and retain additional meaningful digits from readings and configured thresholds. Extreme
+  finite magnitudes use compact scientific notation, and statistics avoid intermediate overflow.
 - **Statistics are descriptive.** Minimum, maximum, and arithmetic mean are useful for demonstration
   but do not model sensor uncertainty, sampling gaps, calibration, or operational trend analysis.
   Signal-strength average is the arithmetic mean of dBm samples; because dBm is logarithmic, this

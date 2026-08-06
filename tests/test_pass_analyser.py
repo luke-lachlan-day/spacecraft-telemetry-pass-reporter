@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from sys import float_info
 from typing import cast
 
 import pytest
@@ -85,6 +86,26 @@ def test_analysis_calculates_summary_statistics(
     assert temperature.average == pytest.approx(30.0)
 
 
+@pytest.mark.parametrize(
+    ("battery_values", "expected_average"),
+    [
+        ((1e308, 1e308), 1e308),
+        ((float_info.max, float_info.max), float_info.max),
+        ((float_info.max, -float_info.max), 0.0),
+    ],
+)
+def test_analysis_calculates_extreme_finite_averages_without_overflow(
+    pass_factory: Callable[[tuple[tuple[float, float, float], ...], str, str], TelemetryPass],
+    battery_values: tuple[float, float],
+    expected_average: float,
+) -> None:
+    measurements = tuple((battery, 25.0, -80.0) for battery in battery_values)
+
+    result = analyse_pass(pass_factory(measurements))
+
+    assert result.statistics.battery_voltage.average == expected_average
+
+
 def test_occurrences_are_chronological_and_use_stable_metric_order(
     pass_factory: Callable[[tuple[tuple[float, float, float], ...], str, str], TelemetryPass],
 ) -> None:
@@ -107,13 +128,18 @@ def test_nominal_and_warning_summaries_are_deterministic(
 ) -> None:
     nominal = analyse_pass(pass_factory(((3.8, 25.0, -80.0),)))
     warning = analyse_pass(pass_factory(((3.6, 25.0, -80.0),)))
+    warning_plural = analyse_pass(pass_factory(((3.6, 25.0, -80.0), (3.5, 25.0, -80.0))))
 
     assert nominal.operational_summary == (
         "The single reading remained within the configured nominal operating ranges."
     )
     assert warning.operational_summary == (
-        "No critical conditions were detected. 1 of 1 reading entered warning ranges, "
+        "No critical conditions were detected. 1 of 1 reading was in warning ranges, "
         "producing 1 warning metric occurrence."
+    )
+    assert warning_plural.operational_summary == (
+        "No critical conditions were detected. 2 of 2 readings were in warning ranges, "
+        "producing 2 warning metric occurrences."
     )
 
 

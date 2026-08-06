@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 from importlib.metadata import version
 from pathlib import Path
 
@@ -168,6 +169,82 @@ def test_cli_rejects_oversized_input_without_writing_report(
     assert "file exceeds the 5 MiB input limit" in captured.err
     assert "Traceback" not in captured.err
     assert not output_path.exists()
+
+
+def test_cli_generates_report_for_extreme_finite_values(
+    tmp_path: Path,
+    valid_payload: dict[str, object],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    readings = valid_payload["readings"]
+    assert isinstance(readings, list)
+    for reading in readings:
+        assert isinstance(reading, dict)
+        reading["battery_voltage"] = 1e308
+    input_path = tmp_path / "extreme.json"
+    output_path = tmp_path / "extreme-report.html"
+    _write_payload(input_path, valid_payload)
+
+    assert main([str(input_path), "--output", str(output_path)]) == 0
+
+    html = output_path.read_text(encoding="utf-8")
+    assert "1e+308 V" in html
+    assert "<dt>Average</dt><dd>1.00e+308</dd>" in html
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert "Traceback" not in captured.out
+
+
+def test_cli_retries_temporary_file_name_collision(
+    tmp_path: Path,
+    valid_payload: dict[str, object],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    input_path = tmp_path / "pass.json"
+    output_path = tmp_path / "report.html"
+    collision_path = tmp_path / ".report.html.collision.tmp"
+    _write_payload(input_path, valid_payload)
+    collision_path.write_text("keep me", encoding="utf-8")
+    tokens = iter(("collision", "available"))
+    monkeypatch.setattr("telemetry_report.cli.secrets.token_hex", lambda _size: next(tokens))
+
+    assert main([str(input_path), "--output", str(output_path)]) == 0
+
+    assert collision_path.read_text(encoding="utf-8") == "keep me"
+    assert not (tmp_path / ".report.html.available.tmp").exists()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX permission contract")
+def test_cli_new_report_permissions_respect_umask(
+    tmp_path: Path,
+    valid_payload: dict[str, object],
+) -> None:
+    input_path = tmp_path / "pass.json"
+    output_path = tmp_path / "report.html"
+    _write_payload(input_path, valid_payload)
+    previous_umask = os.umask(0o027)
+    try:
+        assert main([str(input_path), "--output", str(output_path)]) == 0
+    finally:
+        os.umask(previous_umask)
+
+    assert stat.S_IMODE(output_path.stat().st_mode) == 0o640
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX permission contract")
+def test_cli_existing_report_permissions_survive_replacement(
+    tmp_path: Path,
+    valid_payload: dict[str, object],
+) -> None:
+    input_path = tmp_path / "pass.json"
+    output_path = tmp_path / "report.html"
+    _write_payload(input_path, valid_payload)
+    output_path.write_text("existing", encoding="utf-8")
+    output_path.chmod(0o604)
+
+    assert main([str(input_path), "--output", str(output_path)]) == 0
+
+    assert stat.S_IMODE(output_path.stat().st_mode) == 0o604
 
 
 def test_package_version_comes_from_distribution_metadata() -> None:

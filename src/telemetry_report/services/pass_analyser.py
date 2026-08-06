@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from math import fsum
 from statistics import fmean
 
 from telemetry_report.domain.models import (
@@ -56,9 +57,15 @@ def _analyse_reading(
 
 
 def _statistics(readings: tuple[TelemetryReading, ...]) -> MetricValues[MetricStatistics]:
+    def safe_mean(values: list[float]) -> float:
+        try:
+            return fmean(values)
+        except OverflowError:
+            return fsum(value / len(values) for value in values)
+
     def for_metric(metric: TelemetryMetric) -> MetricStatistics:
         values = [reading.values.for_metric(metric) for reading in readings]
-        return MetricStatistics(minimum=min(values), maximum=max(values), average=fmean(values))
+        return MetricStatistics(minimum=min(values), maximum=max(values), average=safe_mean(values))
 
     return MetricValues(
         battery_voltage=for_metric(TelemetryMetric.BATTERY_VOLTAGE),
@@ -103,10 +110,11 @@ def _summary(counts: StatusCounts, occurrences: tuple[OutOfLimitOccurrence, ...]
             f"{warning_occurrences} warning metric {occurrence_word} for review."
         )
     if counts.warning:
+        warning_verb = "was" if counts.warning == 1 else "were"
         return (
             f"No critical conditions were detected. {counts.warning} of {counts.total} "
-            f"{reading_word} entered warning ranges, producing {warning_occurrences} warning "
-            f"metric {occurrence_word}."
+            f"{reading_word} {warning_verb} in warning ranges, producing "
+            f"{warning_occurrences} warning metric {occurrence_word}."
         )
     if counts.total == 1:
         return "The single reading remained within the configured nominal operating ranges."

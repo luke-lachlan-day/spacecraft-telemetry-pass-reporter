@@ -96,18 +96,29 @@ METRICS_BY_METRIC = {metric.metric: metric for metric in METRICS}
 
 
 def _format_number(value: float, decimals: int) -> str:
-    return f"{value:.{decimals}f}"
+    representation = str(value)
+    if "e" in representation.lower():
+        return f"{value:.{decimals}e}"
+
+    formatted = f"{value:.{decimals}f}"
+    if value != 0.0 and float(formatted) == 0.0:
+        return f"{value:.{decimals}e}"
+    return formatted
 
 
 def _format_measurement(value: float, minimum_decimals: int) -> str:
-    exponent = Decimal(str(value)).as_tuple().exponent
+    representation = str(value)
+    if "e" in representation.lower():
+        return representation
+
+    exponent = Decimal(representation).as_tuple().exponent
     if not isinstance(exponent, int):
         return _format_number(value, minimum_decimals)
     return _format_number(value, max(minimum_decimals, -exponent))
 
 
 def _format_timestamp(value: datetime) -> str:
-    return value.isoformat(timespec="seconds")
+    return value.isoformat(timespec="auto")
 
 
 def _threshold_description(limit: OperatingLimit, metric: MetricPresentation) -> str:
