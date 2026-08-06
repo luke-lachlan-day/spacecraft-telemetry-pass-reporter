@@ -143,6 +143,34 @@ def test_nominal_and_warning_summaries_are_deterministic(
     )
 
 
+@pytest.mark.parametrize(
+    ("measurements", "expected_summary"),
+    [
+        (
+            ((3.3, 25.0, -80.0),),
+            "Critical conditions occurred in 1 of 1 reading. The out-of-limit timeline "
+            "contains 1 critical metric occurrence and 0 warning metric occurrences for review.",
+        ),
+        (
+            ((3.3, 40.0, -80.0),),
+            "Critical conditions occurred in 1 of 1 reading. The out-of-limit timeline "
+            "contains 1 critical metric occurrence and 1 warning metric occurrence for review.",
+        ),
+        (
+            ((3.3, 40.0, -80.0), (3.2, 45.0, -80.0)),
+            "Critical conditions occurred in 2 of 2 readings. The out-of-limit timeline "
+            "contains 2 critical metric occurrences and 2 warning metric occurrences for review.",
+        ),
+    ],
+)
+def test_critical_summaries_pluralize_each_occurrence_count(
+    pass_factory: Callable[[tuple[tuple[float, float, float], ...], str, str], TelemetryPass],
+    measurements: tuple[tuple[float, float, float], ...],
+    expected_summary: str,
+) -> None:
+    assert analyse_pass(pass_factory(measurements)).operational_summary == expected_summary
+
+
 def test_analysis_rejects_empty_domain_pass(
     pass_factory: Callable[[tuple[tuple[float, float, float], ...], str, str], TelemetryPass],
 ) -> None:

@@ -98,23 +98,28 @@ def _counts(readings: tuple[ReadingAnalysis, ...]) -> StatusCounts:
     )
 
 
+def _metric_occurrence_phrase(count: int, severity: str) -> str:
+    occurrence_word = "occurrence" if count == 1 else "occurrences"
+    return f"{count} {severity} metric {occurrence_word}"
+
+
 def _summary(counts: StatusCounts, occurrences: tuple[OutOfLimitOccurrence, ...]) -> str:
     critical_occurrences = sum(occurrence.status is Status.CRITICAL for occurrence in occurrences)
     warning_occurrences = sum(occurrence.status is Status.WARNING for occurrence in occurrences)
     reading_word = "reading" if counts.total == 1 else "readings"
-    occurrence_word = "occurrence" if len(occurrences) == 1 else "occurrences"
     if counts.critical:
         return (
             f"Critical conditions occurred in {counts.critical} of {counts.total} {reading_word}. "
-            f"The out-of-limit timeline contains {critical_occurrences} critical and "
-            f"{warning_occurrences} warning metric {occurrence_word} for review."
+            f"The out-of-limit timeline contains "
+            f"{_metric_occurrence_phrase(critical_occurrences, 'critical')} and "
+            f"{_metric_occurrence_phrase(warning_occurrences, 'warning')} for review."
         )
     if counts.warning:
         warning_verb = "was" if counts.warning == 1 else "were"
         return (
             f"No critical conditions were detected. {counts.warning} of {counts.total} "
             f"{reading_word} {warning_verb} in warning ranges, producing "
-            f"{warning_occurrences} warning metric {occurrence_word}."
+            f"{_metric_occurrence_phrase(warning_occurrences, 'warning')}."
         )
     if counts.total == 1:
         return "The single reading remained within the configured nominal operating ranges."
