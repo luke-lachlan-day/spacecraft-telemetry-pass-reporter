@@ -34,11 +34,13 @@ produced by the Python analysis result:
 - [ ] Import a valid JSON pass and analyze it.
 - [ ] Save normalized JSON, reopen it, and confirm its contents identify the analyzed pass.
 - [ ] Save the HTML report and open it in a browser; confirm it is self-contained and readable.
-- [ ] Cancel the import dialog and confirm the editor remains unchanged with no error.
+- [ ] Analyze a full pass, cancel the import dialog, and confirm the editor, existing result, and
+      preview remain unchanged; then save both the normalized JSON and HTML report without
+      reanalyzing.
 - [ ] Cancel both save dialogs and confirm the application remains usable with no error.
 
 ## Release decision
 
 - [ ] Record all results and retain any screenshots or failing input needed to reproduce an issue.
 - [ ] If any required check fails, do not replace the published assets. Fix forward with the next
-      patch version (for example, `v1.1.2`).
+      patch version.
