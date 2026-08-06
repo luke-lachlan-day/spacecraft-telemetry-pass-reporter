@@ -20,9 +20,10 @@ Two generated examples are included:
 For the simplest route, open the
 [latest GitHub Release](https://github.com/luke-lachlan-day/spacecraft-telemetry-pass-reporter/releases/latest)
 and download the versioned `spacecraft-telemetry-pass-reporter-*-windows-x64.zip` file and its
-matching `.sha256` file. Verify the checksum, extract the whole ZIP, and run
-`Telemetry Reporter.exe`; the adjacent `_internal` folder must remain in place. Python is not
-required.
+matching `.sha256` file. The versioned `*-build-info.txt` asset records the source commit, build
+platform, locked-input hash, and resolved package versions. Verify the checksum, extract the whole
+ZIP, and run `Telemetry Reporter.exe`; the adjacent `_internal` folder must remain in place. Python
+is not required.
 
 On PowerShell, this prints a hash that should match the first value in the downloaded `.sha256`
 file:
@@ -57,9 +58,10 @@ invalidates the prior result until it is analysed again.
 The supported public interfaces are `telemetry-report-gui`, `telemetry-report` (including its
 equivalent `python -m telemetry_report` entry point), the documented JSON input contract, CLI exit
 codes, and generated report behaviour. `telemetry-report-gui --self-test` validates the packaged
-examples and report pipeline without opening a window. Importable `telemetry_report.*` modules,
-domain types, and the pywebview bridge are implementation details and may change without
-compatibility aliases.
+examples and report pipeline without opening a window. On Windows,
+`telemetry-report-gui --ui-smoke-test` opens an off-screen real WebView2 window and exercises the
+JavaScript-to-Python analysis path. Importable `telemetry_report.*` modules, domain types, and the
+pywebview bridge are implementation details and may change without compatibility aliases.
 
 The distribution retains PEP 561 type information so the implementation remains useful to inspect
 with type-aware tooling. That marker does not make the internal Python modules a compatibility-stable
@@ -239,14 +241,35 @@ command reproduces the checked-in anomalous report. A dedicated Chromium job che
 320, 375, and 1440 pixels, print media/PDF output, accessibility-oriented UI behavior, and browser
 errors. Screenshots and the PDF are uploaded as short-lived artifacts only when that job fails.
 
-The Windows release workflow installs `.[build]`, builds the committed one-folder PyInstaller
-specification on Python 3.13 x64, runs the packaged `--self-test`, and publishes a versioned ZIP plus
-SHA-256 checksum. A manual equivalent build starts with:
+The Windows release workflow uses Windows x64 CPython 3.13.15 and the committed hash lock, verifies
+the resolved environment with `pip check`, and builds the committed one-folder PyInstaller
+specification. It runs both packaged diagnostic modes with process timeouts, verifies the ZIP
+checksum, and publishes a versioned ZIP, checksum, and build-information file. Published asset
+names are immutable: the workflow fails on a collision and never replaces an earlier release.
+
+For a matching manual build, first confirm `py -3.13-64 --version` reports Python 3.13.15, then run:
 
 ```powershell
-python -m pip install -e ".[build]"
+py -3.13-64 -m pip install --require-hashes `
+  -r packaging\release\windows-py313-x64.lock
+py -3.13-64 -m pip install --no-deps --no-build-isolation -e .
+py -3.13-64 -m pip check
 pyinstaller packaging\telemetry_reporter.spec --noconfirm --clean
 ```
+
+The broader ranges in `pyproject.toml` remain the source-install contract. Release-lock maintenance
+uses `pip-tools==7.6.0`; from an activated Windows x64 Python 3.13.15 environment, the single refresh
+command is:
+
+```powershell
+pip-compile --extra build --generate-hashes --allow-unsafe --output-file `
+  packaging\release\windows-py313-x64.lock pyproject.toml
+```
+
+Review and commit lock changes deliberately. Before showcasing a published build, complete the
+[Windows showcase checklist](packaging/release/SHOWCASE_CHECKLIST.md) on a clean Windows account or
+second machine. A failed published version is fixed forward under a new patch version; its assets
+are not replaced.
 
 ## Design decisions and trade-offs
 

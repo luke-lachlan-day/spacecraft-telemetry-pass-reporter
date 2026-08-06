@@ -5,24 +5,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
+from functools import cache
 
-from jinja2 import Environment, PackageLoader, StrictUndefined, select_autoescape
+from jinja2 import Environment, PackageLoader, StrictUndefined, Template, select_autoescape
 
 from telemetry_report.domain.models import (
     LimitDirection,
     OperatingLimit,
     PassAnalysis,
-    TelemetryMetric,
 )
-
-
-@dataclass(frozen=True, slots=True)
-class MetricPresentation:
-    metric: TelemetryMetric
-    label: str
-    unit: str
-    decimals: int
-    average_note: str | None = None
+from telemetry_report.metrics import METRICS, METRICS_BY_METRIC, MetricDefinition
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,21 +72,6 @@ class ReportView:
     readings: tuple[ReadingRowView, ...]
 
 
-METRICS = (
-    MetricPresentation(TelemetryMetric.BATTERY_VOLTAGE, "Battery voltage", "V", 2),
-    MetricPresentation(TelemetryMetric.TEMPERATURE_C, "Temperature", "°C", 1),
-    MetricPresentation(
-        TelemetryMetric.SIGNAL_STRENGTH_DBM,
-        "Signal strength",
-        "dBm",
-        1,
-        "Average is the arithmetic mean of dBm samples; it is not equivalent to averaging "
-        "received power.",
-    ),
-)
-METRICS_BY_METRIC = {metric.metric: metric for metric in METRICS}
-
-
 def _format_number(value: float, decimals: int) -> str:
     representation = str(value)
     if "e" in representation.lower():
@@ -121,9 +98,9 @@ def _format_timestamp(value: datetime) -> str:
     return value.isoformat(timespec="auto")
 
 
-def _threshold_description(limit: OperatingLimit, metric: MetricPresentation) -> str:
-    warning = _format_measurement(limit.warning, metric.decimals)
-    critical = _format_measurement(limit.critical, metric.decimals)
+def _threshold_description(limit: OperatingLimit, metric: MetricDefinition) -> str:
+    warning = _format_measurement(limit.warning, metric.report_decimals)
+    critical = _format_measurement(limit.critical, metric.report_decimals)
     if limit.direction is LimitDirection.MINIMUM:
         return (
             f"Warning at or below {warning} {metric.unit}; "
@@ -145,9 +122,9 @@ def _build_view(analysis: PassAnalysis) -> ReportView:
             MetricSummaryView(
                 label=metric.label,
                 unit=metric.unit,
-                minimum=_format_measurement(statistics.minimum, metric.decimals),
-                maximum=_format_measurement(statistics.maximum, metric.decimals),
-                average=_format_number(statistics.average, metric.decimals),
+                minimum=_format_measurement(statistics.minimum, metric.report_decimals),
+                maximum=_format_measurement(statistics.maximum, metric.report_decimals),
+                average=_format_number(statistics.average, metric.report_decimals),
                 direction=limit.direction.value,
                 threshold_description=_threshold_description(limit, metric),
                 average_note=metric.average_note,
@@ -160,7 +137,7 @@ def _build_view(analysis: PassAnalysis) -> ReportView:
             MetricCellView(
                 unit=metric.unit,
                 value=_format_measurement(
-                    result.reading.values.for_metric(metric.metric), metric.decimals
+                    result.reading.values.for_metric(metric.metric), metric.report_decimals
                 ),
                 status=result.metric_statuses.for_metric(metric.metric).value,
                 status_label=result.metric_statuses.for_metric(metric.metric).value.title(),
@@ -183,7 +160,7 @@ def _build_view(analysis: PassAnalysis) -> ReportView:
             OccurrenceView(
                 timestamp=_format_timestamp(occurrence.timestamp),
                 metric_label=metric.label,
-                value=_format_measurement(occurrence.value, metric.decimals),
+                value=_format_measurement(occurrence.value, metric.report_decimals),
                 unit=metric.unit,
                 status=occurrence.status.value,
                 status_label=occurrence.status.value.title(),
@@ -207,8 +184,8 @@ def _build_view(analysis: PassAnalysis) -> ReportView:
     )
 
 
-def render_report(analysis: PassAnalysis) -> str:
-    """Render ``analysis`` as a self-contained, auto-escaped HTML document."""
+@cache
+def _report_template() -> Template:
     environment = Environment(
         loader=PackageLoader("telemetry_report", "presentation/templates"),
         autoescape=select_autoescape(enabled_extensions=("html", "jinja"), default_for_string=True),
@@ -216,5 +193,9 @@ def render_report(analysis: PassAnalysis) -> str:
         trim_blocks=True,
         lstrip_blocks=True,
     )
-    template = environment.get_template("report.html.jinja")
-    return template.render(report=_build_view(analysis))
+    return environment.get_template("report.html.jinja")
+
+
+def render_report(analysis: PassAnalysis) -> str:
+    """Render ``analysis`` as a self-contained, auto-escaped HTML document."""
+    return _report_template().render(report=_build_view(analysis))

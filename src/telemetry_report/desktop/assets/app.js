@@ -1,26 +1,19 @@
 "use strict";
 
-const metricDefinitions = [
-  { key: "battery_voltage", slug: "battery-voltage", label: "Battery voltage", unit: "V", direction: "minimum", warning: 3.6, critical: 3.4 },
-  { key: "temperature_c", slug: "temperature-c", label: "Temperature", unit: "°C", direction: "maximum", warning: 40, critical: 50 },
-  { key: "signal_strength_dbm", slug: "signal-strength-dbm", label: "Signal strength", unit: "dBm", direction: "minimum", warning: -90, critical: -105 },
-];
-
-const quickDefaults = { battery: 3.8, temperature: 25, signal: -80 };
+let metricDefinitions = [];
+const quickFields = {};
 const state = {
   mode: "quick",
   analysisId: null,
   quickTimestamp: new Date().toISOString(),
   fullLoaded: false,
   inputRevision: 0,
+  editorRequestRevision: 0,
+  initialized: false,
+  initializationPromise: null,
 };
 
 const byId = (id) => document.getElementById(id);
-const quickFields = {
-  battery: { range: byId("quick-battery-range"), number: byId("quick-battery"), output: byId("quick-battery-output"), decimals: 2, unit: "V" },
-  temperature: { range: byId("quick-temperature-range"), number: byId("quick-temperature"), output: byId("quick-temperature-output"), decimals: 1, unit: "°C" },
-  signal: { range: byId("quick-signal-range"), number: byId("quick-signal"), output: byId("quick-signal-output"), decimals: 0, unit: "dBm" },
-};
 
 function bridgeApi() {
   return window.pywebview && window.pywebview.api ? window.pywebview.api : null;
@@ -28,14 +21,16 @@ function bridgeApi() {
 
 async function callBridge(method, ...args) {
   const api = bridgeApi();
-  if (!api || typeof api[method] !== "function") throw new Error("The Python desktop bridge is unavailable.");
+  if (!api || typeof api[method] !== "function") {
+    throw new Error("The Python desktop bridge is unavailable.");
+  }
   return api[method](...args);
 }
 
 function setBridgeStatus(message) { byId("bridge-status").textContent = message; }
 
 function setBusy(isBusy, message) {
-  byId("analyse-button").disabled = isBusy;
+  byId("analyse-button").disabled = isBusy || !state.initialized;
   byId("analyse-button").textContent = isBusy ? "Analyzing…" : "Validate & Analyze";
   if (message) setBridgeStatus(message);
 }
@@ -57,6 +52,7 @@ function discardStaleAnalysis() {
 
 function invalidateResult(message = "Inputs changed. Validate again to refresh the report.") {
   state.inputRevision += 1;
+  state.editorRequestRevision += 1;
   if (state.analysisId) setBridgeStatus(message);
   clearResult();
 }
@@ -68,53 +64,79 @@ function valueOrRaw(value) {
   return Number.isFinite(parsed) ? parsed : trimmed;
 }
 
-function updateQuickOutput(name) {
-  const field = quickFields[name];
-  const value = Number(field.number.value);
-  const formatted = Number.isFinite(value) ? value.toFixed(field.decimals).replace("-", "−") : field.number.value;
-  field.output.textContent = `${formatted} ${field.unit}`;
+function formatQuickNumber(value, decimals) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return String(value);
+  return parsed.toFixed(decimals).replace("-", "−");
 }
 
-function pairQuickControl(name) {
-  const field = quickFields[name];
-  field.range.addEventListener("input", () => {
-    field.number.value = field.range.value;
-    updateQuickOutput(name);
+function formatLimitRule(metric, severity) {
+  const symbol = metric.limit.direction === "minimum" ? "≤" : "≥";
+  const value = formatQuickNumber(metric.limit[severity], metric.quick.decimals);
+  const label = severity[0].toUpperCase() + severity.slice(1);
+  return `${label} ${symbol} ${value} ${metric.unit}`;
+}
+
+function renderQuickControls() {
+  const grid = byId("quick-grid");
+  grid.replaceChildren();
+  metricDefinitions.forEach((metric) => {
+    const card = document.createElement("article");
+    card.className = "control-card";
+    card.innerHTML = `
+      <div class="control-heading">
+        <div><h3>${metric.label}</h3><p>${metric.limit.direction === "minimum" ? "Lower values move toward the unsafe range." : "Higher values move toward the unsafe range."}</p></div>
+        <output id="quick-${metric.slug}-output" for="quick-${metric.slug}-range quick-${metric.slug}"></output>
+      </div>
+      <label class="sr-only" for="quick-${metric.slug}-range">${metric.label} slider</label>
+      <input id="quick-${metric.slug}-range" data-quick-key="${metric.key}" data-quick-kind="range" type="range" min="${metric.quick.minimum}" max="${metric.quick.maximum}" step="${metric.quick.step}">
+      <div class="number-row">
+        <label for="quick-${metric.slug}">Exact value</label>
+        <div class="input-with-unit"><input id="quick-${metric.slug}" data-quick-key="${metric.key}" data-quick-kind="number" type="number" min="${metric.quick.minimum}" max="${metric.quick.maximum}" step="${metric.quick.step}"><span>${metric.unit}</span></div>
+      </div>
+      <p class="limit-note"><strong>${formatLimitRule(metric, "warning")}</strong><span>${formatLimitRule(metric, "critical")}</span></p>`;
+    grid.append(card);
+    quickFields[metric.key] = {
+      range: byId(`quick-${metric.slug}-range`),
+      number: byId(`quick-${metric.slug}`),
+      output: byId(`quick-${metric.slug}-output`),
+      definition: metric,
+    };
   });
-  field.number.addEventListener("input", () => {
-    const value = Number(field.number.value);
-    if (Number.isFinite(value)) field.range.value = field.number.value;
-    updateQuickOutput(name);
-  });
+}
+
+function updateQuickOutput(key) {
+  const field = quickFields[key];
+  const formatted = formatQuickNumber(field.number.value, field.definition.quick.decimals);
+  field.output.textContent = `${formatted} ${field.definition.unit}`;
 }
 
 function resetQuick() {
+  if (!state.initialized) return;
   clearErrors();
   state.quickTimestamp = new Date().toISOString();
-  Object.entries(quickDefaults).forEach(([name, value]) => {
-    quickFields[name].range.value = String(value);
-    quickFields[name].number.value = String(value);
-    updateQuickOutput(name);
+  metricDefinitions.forEach((metric) => {
+    const field = quickFields[metric.key];
+    field.range.value = String(metric.quick.default);
+    field.number.value = String(metric.quick.default);
+    updateQuickOutput(metric.key);
   });
   invalidateResult("Quick Experiment reset. Validate when ready.");
 }
 
 function quickPayload() {
+  const limits = {};
+  const reading = { timestamp: state.quickTimestamp };
+  metricDefinitions.forEach((metric) => {
+    limits[metric.key] = { ...metric.limit };
+    reading[metric.key] = valueOrRaw(quickFields[metric.key].number.value);
+  });
   return {
     pass_id: "QUICK-EXPERIMENT",
     spacecraft: "DEMO-CRAFT",
     started_at: state.quickTimestamp,
-    limits: {
-      battery_voltage: { direction: "minimum", warning: 3.6, critical: 3.4 },
-      temperature_c: { direction: "maximum", warning: 40, critical: 50 },
-      signal_strength_dbm: { direction: "minimum", warning: -90, critical: -105 },
-    },
-    readings: [{
-      timestamp: state.quickTimestamp,
-      battery_voltage: valueOrRaw(quickFields.battery.number.value),
-      temperature_c: valueOrRaw(quickFields.temperature.number.value),
-      signal_strength_dbm: valueOrRaw(quickFields.signal.number.value),
-    }],
+    limits,
+    readings: [reading],
   };
 }
 
@@ -135,15 +157,44 @@ function renderLimitEditors() {
   });
 }
 
-function readingValue(reading, key) { return reading && reading[key] !== undefined ? String(reading[key]) : ""; }
+function renderReadingHeader() {
+  const row = byId("readings-head-row");
+  row.replaceChildren();
+  const timestamp = document.createElement("th");
+  timestamp.scope = "col";
+  timestamp.textContent = "Timestamp";
+  row.append(timestamp);
+  metricDefinitions.forEach((metric) => {
+    const heading = document.createElement("th");
+    heading.scope = "col";
+    heading.textContent = `${metric.label} (${metric.unit})`;
+    row.append(heading);
+  });
+  const actions = document.createElement("th");
+  actions.scope = "col";
+  actions.setAttribute("aria-label", "Row actions");
+  row.append(actions);
+}
+
+function readingValue(reading, key) {
+  return reading && reading[key] !== undefined ? String(reading[key]) : "";
+}
+
+function escapeAttribute(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
 
 function addReadingRow(reading = {}, afterIndex = null) {
   const row = document.createElement("tr");
+  const metricCells = metricDefinitions.map((metric) => `
+    <td><label class="sr-only">${metric.label}</label><input class="reading-metric" data-metric-key="${metric.key}" type="text" inputmode="decimal" value="${escapeAttribute(readingValue(reading, metric.key))}"></td>`).join("");
   row.innerHTML = `
     <td><label class="sr-only">Reading timestamp</label><input class="reading-timestamp" type="text" spellcheck="false" value="${escapeAttribute(readingValue(reading, "timestamp"))}"></td>
-    <td><label class="sr-only">Battery voltage</label><input class="reading-battery" type="text" inputmode="decimal" value="${escapeAttribute(readingValue(reading, "battery_voltage"))}"></td>
-    <td><label class="sr-only">Temperature</label><input class="reading-temperature" type="text" inputmode="decimal" value="${escapeAttribute(readingValue(reading, "temperature_c"))}"></td>
-    <td><label class="sr-only">Signal strength</label><input class="reading-signal" type="text" inputmode="decimal" value="${escapeAttribute(readingValue(reading, "signal_strength_dbm"))}"></td>
+    ${metricCells}
     <td><div class="row-actions"><button class="icon-button duplicate" type="button" title="Duplicate reading">Duplicate</button><button class="icon-button delete" type="button" title="Delete reading">Delete</button></div></td>`;
   const body = byId("readings-body");
   if (afterIndex === null || afterIndex >= body.children.length - 1) body.append(row);
@@ -151,16 +202,15 @@ function addReadingRow(reading = {}, afterIndex = null) {
   renumberReadingRows();
 }
 
-function escapeAttribute(value) {
-  return String(value).replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
-}
-
 function renumberReadingRows() {
   [...byId("readings-body").rows].forEach((row, index) => {
     row.dataset.index = String(index);
-    const ids = ["timestamp", "battery-voltage", "temperature-c", "signal-strength-dbm"];
-    [...row.querySelectorAll("input")].forEach((input, inputIndex) => {
-      input.id = `reading-${index}-${ids[inputIndex]}`;
+    const timestamp = row.querySelector(".reading-timestamp");
+    timestamp.id = `reading-${index}-timestamp`;
+    timestamp.previousElementSibling.htmlFor = timestamp.id;
+    metricDefinitions.forEach((metric) => {
+      const input = row.querySelector(`[data-metric-key="${metric.key}"]`);
+      input.id = `reading-${index}-${metric.slug}`;
       input.previousElementSibling.htmlFor = input.id;
     });
   });
@@ -172,7 +222,7 @@ function setFullPayload(payload) {
   byId("full-spacecraft").value = payload.spacecraft ?? "";
   byId("full-started-at").value = payload.started_at ?? "";
   metricDefinitions.forEach((metric) => {
-    const limit = payload.limits && payload.limits[metric.key] ? payload.limits[metric.key] : metric;
+    const limit = payload.limits && payload.limits[metric.key] ? payload.limits[metric.key] : metric.limit;
     byId(`limit-${metric.slug}-direction`).value = limit.direction;
     byId(`limit-${metric.slug}-warning`).value = limit.warning;
     byId(`limit-${metric.slug}-critical`).value = limit.critical;
@@ -192,12 +242,13 @@ function fullPayload() {
       critical: valueOrRaw(byId(`limit-${metric.slug}-critical`).value),
     };
   });
-  const readings = [...byId("readings-body").rows].map((row) => ({
-    timestamp: row.querySelector(".reading-timestamp").value,
-    battery_voltage: valueOrRaw(row.querySelector(".reading-battery").value),
-    temperature_c: valueOrRaw(row.querySelector(".reading-temperature").value),
-    signal_strength_dbm: valueOrRaw(row.querySelector(".reading-signal").value),
-  }));
+  const readings = [...byId("readings-body").rows].map((row) => {
+    const reading = { timestamp: row.querySelector(".reading-timestamp").value };
+    metricDefinitions.forEach((metric) => {
+      reading[metric.key] = valueOrRaw(row.querySelector(`[data-metric-key="${metric.key}"]`).value);
+    });
+    return reading;
+  });
   return {
     pass_id: byId("full-pass-id").value,
     spacecraft: byId("full-spacecraft").value,
@@ -223,31 +274,55 @@ function switchMode(mode) {
   if (!quick && !state.fullLoaded) loadExample("nominal");
 }
 
-function fieldIdForPath(path) {
+function metricForKey(key) {
+  return metricDefinitions.find((metric) => metric.key === key);
+}
+
+function fieldTargetsForPath(path) {
   if (state.mode === "quick") {
-    const quickMap = {
-      "readings.0.battery_voltage": "quick-battery",
-      "readings.0.temperature_c": "quick-temperature",
-      "readings.0.signal_strength_dbm": "quick-signal",
-    };
-    return quickMap[path] || "analyse-button";
+    const readingMatch = path.match(/^readings\.0\.(.+)$/);
+    const metric = readingMatch ? metricForKey(readingMatch[1]) : null;
+    const id = metric ? `quick-${metric.slug}` : "analyse-button";
+    return { focusId: id, invalidIds: metric ? [id] : [] };
   }
-  const direct = { pass_id: "full-pass-id", spacecraft: "full-spacecraft", started_at: "full-started-at" };
-  if (direct[path]) return direct[path];
-  const limitMatch = path.match(/^limits\.(battery_voltage|temperature_c|signal_strength_dbm)\.(direction|warning|critical)$/);
+
+  const direct = {
+    pass_id: "full-pass-id",
+    spacecraft: "full-spacecraft",
+    started_at: "full-started-at",
+  };
+  if (direct[path]) return { focusId: direct[path], invalidIds: [direct[path]] };
+
+  const limitMatch = path.match(/^limits\.([^.]+)(?:\.(direction|warning|critical))?$/);
   if (limitMatch) {
-    const metric = metricDefinitions.find((item) => item.key === limitMatch[1]);
-    return `limit-${metric.slug}-${limitMatch[2]}`;
+    const metric = metricForKey(limitMatch[1]);
+    if (metric && limitMatch[2]) {
+      const id = `limit-${metric.slug}-${limitMatch[2]}`;
+      return { focusId: id, invalidIds: [id] };
+    }
+    if (metric) {
+      const ids = ["direction", "warning", "critical"].map((field) => `limit-${metric.slug}-${field}`);
+      return { focusId: ids[0], invalidIds: ids };
+    }
   }
-  const readingMatch = path.match(/^readings\.(\d+)\.(timestamp|battery_voltage|temperature_c|signal_strength_dbm)$/);
+
+  const readingMatch = path.match(/^readings\.(\d+)\.(timestamp|.+)$/);
   if (readingMatch) {
-    const fieldSlugs = { timestamp: "timestamp", battery_voltage: "battery-voltage", temperature_c: "temperature-c", signal_strength_dbm: "signal-strength-dbm" };
-    return `reading-${readingMatch[1]}-${fieldSlugs[readingMatch[2]]}`;
+    if (readingMatch[2] === "timestamp") {
+      const id = `reading-${readingMatch[1]}-timestamp`;
+      return { focusId: id, invalidIds: [id] };
+    }
+    const metric = metricForKey(readingMatch[2]);
+    if (metric) {
+      const id = `reading-${readingMatch[1]}-${metric.slug}`;
+      return { focusId: id, invalidIds: [id] };
+    }
   }
-  return "analyse-button";
+  return { focusId: "analyse-button", invalidIds: [] };
 }
 
 function clearErrors() {
+  byId("error-title").textContent = "Please correct the highlighted telemetry";
   byId("error-summary").hidden = true;
   byId("error-list").replaceChildren();
   document.querySelectorAll('[aria-invalid="true"]').forEach((element) => element.removeAttribute("aria-invalid"));
@@ -255,14 +330,18 @@ function clearErrors() {
 
 function showErrors(result) {
   clearErrors();
-  const issues = Array.isArray(result.issues) && result.issues.length ? result.issues : [{ path: "input", message: result.error || "The telemetry could not be analysed." }];
+  const issues = Array.isArray(result.issues) && result.issues.length
+    ? result.issues
+    : [{ path: "input", message: result.error || "The telemetry could not be analysed." }];
   issues.forEach((issue) => {
-    const targetId = fieldIdForPath(issue.path);
-    const target = byId(targetId);
-    if (target && targetId !== "analyse-button") target.setAttribute("aria-invalid", "true");
+    const targets = fieldTargetsForPath(issue.path);
+    targets.invalidIds.forEach((id) => {
+      const target = byId(id);
+      if (target) target.setAttribute("aria-invalid", "true");
+    });
     const item = document.createElement("li");
     const link = document.createElement("a");
-    link.href = `#${targetId}`;
+    link.href = `#${targets.focusId}`;
     link.textContent = `${issue.path}: ${issue.message}`;
     item.append(link);
     byId("error-list").append(item);
@@ -270,6 +349,18 @@ function showErrors(result) {
   byId("error-summary").hidden = false;
   byId("error-summary").focus();
   setBridgeStatus("Validation found fields that need attention.");
+}
+
+function showInitializationError(error) {
+  clearErrors();
+  byId("error-title").textContent = "The desktop application could not initialize";
+  const item = document.createElement("li");
+  item.textContent = error.message || String(error);
+  byId("error-list").append(item);
+  byId("error-summary").hidden = false;
+  byId("error-summary").focus();
+  byId("analyse-button").disabled = true;
+  setBridgeStatus("Initialization failed. Restart the application or reinstall the complete bundle.");
 }
 
 function renderResult(result) {
@@ -304,6 +395,7 @@ function renderResult(result) {
 }
 
 async function analyseCurrent() {
+  if (!state.initialized) return;
   clearErrors();
   setBusy(true, "Validating and analyzing with Python…");
   const submittedRevision = state.inputRevision;
@@ -317,33 +409,50 @@ async function analyseCurrent() {
     if (!result.ok) showErrors(result);
     else renderResult(result);
   } catch (error) {
-    if (submittedRevision !== state.inputRevision) {
-      discardStaleAnalysis();
-    } else {
-      showErrors({ error: error.message, issues: [] });
-    }
+    if (submittedRevision !== state.inputRevision) discardStaleAnalysis();
+    else showErrors({ error: error.message, issues: [] });
   } finally {
     setBusy(false);
   }
 }
 
+function beginEditorRequest() {
+  return {
+    requestRevision: ++state.editorRequestRevision,
+    inputRevision: state.inputRevision,
+  };
+}
+
+function editorRequestIsCurrent(request) {
+  return request.requestRevision === state.editorRequestRevision
+    && request.inputRevision === state.inputRevision;
+}
+
 async function loadExample(name) {
+  const request = beginEditorRequest();
   setBridgeStatus(`Loading ${name} example…`);
   try {
     const result = await callBridge("load_example", name);
+    if (!editorRequestIsCurrent(request)) return;
     if (!result.ok) showErrors(result);
     else setFullPayload(JSON.parse(result.payload_json));
-  } catch (error) { showErrors({ error: error.message, issues: [] }); }
+  } catch (error) {
+    if (editorRequestIsCurrent(request)) showErrors({ error: error.message, issues: [] });
+  }
 }
 
 async function importJson() {
+  const request = beginEditorRequest();
   setBridgeStatus("Opening telemetry JSON…");
   try {
     const result = await callBridge("open_input_json");
+    if (!editorRequestIsCurrent(request)) return;
     if (result.cancelled) setBridgeStatus("Import cancelled.");
     else if (!result.ok) showErrors(result);
     else setFullPayload(JSON.parse(result.payload_json));
-  } catch (error) { showErrors({ error: error.message, issues: [] }); }
+  } catch (error) {
+    if (editorRequestIsCurrent(request)) showErrors({ error: error.message, issues: [] });
+  }
 }
 
 async function save(kind) {
@@ -359,7 +468,14 @@ async function save(kind) {
 }
 
 function bindEvents() {
-  Object.keys(quickFields).forEach(pairQuickControl);
+  byId("quick-grid").addEventListener("input", (event) => {
+    const key = event.target.dataset.quickKey;
+    if (!key) return;
+    const field = quickFields[key];
+    if (event.target.dataset.quickKind === "range") field.number.value = field.range.value;
+    else if (Number.isFinite(Number(field.number.value))) field.range.value = field.number.value;
+    updateQuickOutput(key);
+  });
   byId("quick-reset").addEventListener("click", resetQuick);
   byId("quick-tab").addEventListener("click", () => switchMode("quick"));
   byId("full-tab").addEventListener("click", () => switchMode("full"));
@@ -378,18 +494,18 @@ function bindEvents() {
     const index = Number(row.dataset.index);
     if (button.classList.contains("delete")) row.remove();
     if (button.classList.contains("duplicate")) {
-      const reading = {
-        timestamp: row.querySelector(".reading-timestamp").value,
-        battery_voltage: row.querySelector(".reading-battery").value,
-        temperature_c: row.querySelector(".reading-temperature").value,
-        signal_strength_dbm: row.querySelector(".reading-signal").value,
-      };
+      const reading = { timestamp: row.querySelector(".reading-timestamp").value };
+      metricDefinitions.forEach((metric) => {
+        reading[metric.key] = row.querySelector(`[data-metric-key="${metric.key}"]`).value;
+      });
       addReadingRow(reading, index);
     }
     renumberReadingRows();
     invalidateResult();
   });
-  document.querySelectorAll(".example-button").forEach((button) => button.addEventListener("click", () => loadExample(button.dataset.example)));
+  document.querySelectorAll(".example-button").forEach((button) => {
+    button.addEventListener("click", () => loadExample(button.dataset.example));
+  });
   byId("import-json").addEventListener("click", importJson);
   byId("analyse-button").addEventListener("click", analyseCurrent);
   byId("save-json").addEventListener("click", () => save("json"));
@@ -399,8 +515,44 @@ function bindEvents() {
   });
 }
 
-renderLimitEditors();
-bindEvents();
-resetQuick();
-window.addEventListener("pywebviewready", () => setBridgeStatus("The Python engine is ready."));
-if (!bridgeApi()) setBridgeStatus("Waiting for the Python desktop bridge…");
+function validateConfiguration(configuration) {
+  if (!configuration || !Array.isArray(configuration.metrics) || configuration.metrics.length !== 3) {
+    throw new Error("The Python bridge returned an invalid metric configuration.");
+  }
+  const keys = new Set(configuration.metrics.map((metric) => metric.key));
+  const slugs = new Set(configuration.metrics.map((metric) => metric.slug));
+  if (keys.size !== configuration.metrics.length || slugs.size !== configuration.metrics.length) {
+    throw new Error("The Python bridge returned duplicate metric identifiers.");
+  }
+  configuration.metrics.forEach((metric) => {
+    if (!metric.label || !metric.unit || !metric.quick || !metric.limit) {
+      throw new Error(`The Python bridge returned incomplete configuration for '${metric.key}'.`);
+    }
+  });
+  return configuration.metrics;
+}
+
+async function initializeApp() {
+  if (state.initializationPromise) return state.initializationPromise;
+  state.initializationPromise = (async () => {
+    try {
+      const configuration = await callBridge("get_configuration");
+      metricDefinitions = validateConfiguration(configuration);
+      renderQuickControls();
+      renderLimitEditors();
+      renderReadingHeader();
+      bindEvents();
+      state.initialized = true;
+      resetQuick();
+      byId("analyse-button").disabled = false;
+      setBridgeStatus("The Python engine is ready.");
+    } catch (error) {
+      showInitializationError(error);
+    }
+  })();
+  return state.initializationPromise;
+}
+
+window.addEventListener("pywebviewready", initializeApp, { once: true });
+if (bridgeApi()) initializeApp();
+else setBridgeStatus("Waiting for the Python desktop bridge…");

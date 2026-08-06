@@ -1,6 +1,7 @@
 """PyInstaller definition for the portable Windows x64 desktop application."""
 
 from pathlib import Path
+from shutil import copy2
 
 from PyInstaller.utils.hooks import collect_data_files
 
@@ -8,12 +9,6 @@ from PyInstaller.utils.hooks import collect_data_files
 repository_root = Path(SPEC).resolve().parent.parent
 
 datas = collect_data_files("telemetry_report")
-datas.extend(
-    [
-        (str(repository_root / "LICENSE"), "."),
-        (str(repository_root / "packaging" / "release" / "README.txt"), "."),
-    ]
-)
 
 analysis = Analysis(
     [str(repository_root / "src" / "telemetry_report" / "desktop" / "launcher.py")],
@@ -69,3 +64,9 @@ bundle = COLLECT(
     upx_exclude=[],
     name="Telemetry Reporter",
 )
+
+# PyInstaller 6 places normal ``datas`` below ``_internal``. Keep these user-facing files beside
+# the executable while making this specification the single authority for their inclusion.
+bundle_root = Path(DISTPATH) / "Telemetry Reporter"
+copy2(repository_root / "LICENSE", bundle_root / "LICENSE")
+copy2(repository_root / "packaging" / "release" / "README.txt", bundle_root / "README.txt")

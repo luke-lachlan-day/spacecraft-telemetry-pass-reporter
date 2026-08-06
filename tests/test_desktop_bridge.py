@@ -8,6 +8,7 @@ import pytest
 
 from telemetry_report.desktop.bridge import DesktopBridge, safe_filename_stem
 from telemetry_report.desktop.launcher import main as desktop_main
+from telemetry_report.metrics import METRICS
 
 
 @dataclass
@@ -32,6 +33,36 @@ class FakeDialogs:
 
 def _payload_json(payload: dict[str, object]) -> str:
     return json.dumps(payload)
+
+
+def test_bridge_configuration_serializes_the_shared_metric_catalog() -> None:
+    result = DesktopBridge().get_configuration()
+
+    assert result == {
+        "metrics": [
+            {
+                "key": definition.metric.value,
+                "slug": definition.slug,
+                "label": definition.label,
+                "unit": definition.unit,
+                "report_decimals": definition.report_decimals,
+                "average_note": definition.average_note,
+                "quick": {
+                    "default": definition.quick.default,
+                    "minimum": definition.quick.minimum,
+                    "maximum": definition.quick.maximum,
+                    "step": definition.quick.step,
+                    "decimals": definition.quick.decimals,
+                },
+                "limit": {
+                    "direction": definition.default_limit.direction.value,
+                    "warning": definition.default_limit.warning,
+                    "critical": definition.default_limit.critical,
+                },
+            }
+            for definition in METRICS
+        ]
+    }
 
 
 def test_bridge_analysis_returns_summary_preview_and_opaque_id(

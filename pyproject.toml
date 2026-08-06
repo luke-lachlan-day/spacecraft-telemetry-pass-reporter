@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=75"]
+requires = ["setuptools>=75", "wheel>=0.45,<1"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "spacecraft-telemetry-pass-reporter"
-version = "1.1.0"
+version = "1.1.1"
 description = "Generate polished HTML reports from fictional spacecraft-pass telemetry."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -38,6 +38,8 @@ desktop = [
 build = [
   "pyinstaller>=6.21,<7",
   "pywebview>=6.2.1,<7",
+  "setuptools>=75",
+  "wheel>=0.45,<1",
 ]
 browser = [
   "playwright>=1.61,<2",

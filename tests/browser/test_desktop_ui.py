@@ -7,29 +7,67 @@ from typing import Any
 import pytest
 
 from telemetry_report.data import validate_telemetry_json
-from telemetry_report.presentation.html_renderer import METRICS
+from telemetry_report.desktop.bridge import DesktopBridge
+from telemetry_report.metrics import METRICS
 
 pytestmark = pytest.mark.browser
 
 
-def _stub_script(payload: dict[str, object]) -> str:
+def _stub_script(
+    payload: dict[str, object],
+    *,
+    configuration_error: bool = False,
+    missing_configuration_method: bool = False,
+) -> str:
     payload_json = json.dumps(payload)
+    configuration_json = json.dumps(DesktopBridge().get_configuration())
     report_html = "<!doctype html><html><body><h1>Generated report</h1></body></html>"
     return f"""
       window.__forceValidationError = false;
+      window.__validationIssues = [{{
+        path: 'readings.0.temperature_c',
+        message: 'Input should be a valid number'
+      }}];
       window.__holdAnalysis = false;
       window.__releaseAnalysis = null;
       window.__importCancelled = true;
+      window.__holdImport = false;
+      window.__releaseImport = null;
+      window.__heldExampleNames = [];
+      window.__releaseExamples = {{}};
       window.__bridgeCalls = [];
       const examplePayload = {payload_json};
+      const desktopConfiguration = {configuration_json};
       window.pywebview = {{ api: {{
+        get_configuration: {str(missing_configuration_method).lower()} ? undefined : async () => {{
+          if ({str(configuration_error).lower()}) {{
+            throw new Error('simulated configuration failure');
+          }}
+          return desktopConfiguration;
+        }},
         load_example: async (name) => {{
           window.__bridgeCalls.push(['load_example', name]);
-          return {{ ok: true, cancelled: false, payload_json: JSON.stringify(examplePayload) }};
+          if (window.__heldExampleNames.includes(name)) await new Promise((resolve) => {{
+            window.__releaseExamples[name] = resolve;
+          }});
+          return {{
+            ok: true,
+            cancelled: false,
+            payload_json: JSON.stringify({{ ...examplePayload, pass_id: name.toUpperCase() }})
+          }};
         }},
-        open_input_json: async () => window.__importCancelled
-          ? ({{ ok: true, cancelled: true }})
-          : ({{ ok: true, cancelled: false, payload_json: JSON.stringify(examplePayload) }}),
+        open_input_json: async () => {{
+          if (window.__holdImport) await new Promise((resolve) => {{
+            window.__releaseImport = resolve;
+          }});
+          return window.__importCancelled
+            ? {{ ok: true, cancelled: true }}
+            : {{
+                ok: true,
+                cancelled: false,
+                payload_json: JSON.stringify({{ ...examplePayload, pass_id: 'IMPORTED' }})
+              }};
+        }},
         analyse: async (raw) => {{
           window.__bridgeCalls.push(['analyse', JSON.parse(raw)]);
           if (window.__holdAnalysis) await new Promise((resolve) => {{
@@ -38,10 +76,7 @@ def _stub_script(payload: dict[str, object]) -> str:
           if (window.__forceValidationError) return {{
             ok: false,
             error: 'invalid telemetry',
-            issues: [{{
-              path: 'readings.0.temperature_c',
-              message: 'Input should be a valid number'
-            }}]
+            issues: window.__validationIssues
           }};
           return {{
             ok: true,
@@ -70,7 +105,14 @@ def _stub_script(payload: dict[str, object]) -> str:
     """
 
 
-def _open_app(browser: Any, payload: dict[str, object], width: int = 1180) -> tuple[Any, list[str]]:
+def _open_app(
+    browser: Any,
+    payload: dict[str, object],
+    width: int = 1180,
+    *,
+    configuration_error: bool = False,
+    missing_configuration_method: bool = False,
+) -> tuple[Any, list[str]]:
     app_path = (
         Path(__file__).parents[2] / "src" / "telemetry_report" / "desktop" / "assets" / "app.html"
     )
@@ -81,8 +123,16 @@ def _open_app(browser: Any, payload: dict[str, object], width: int = 1180) -> tu
         "console",
         lambda message: errors.append(message.text) if message.type == "error" else None,
     )
-    page.add_init_script(_stub_script(payload))
+    page.add_init_script(
+        _stub_script(
+            payload,
+            configuration_error=configuration_error,
+            missing_configuration_method=missing_configuration_method,
+        )
+    )
     page.goto(app_path.as_uri(), wait_until="load")
+    if not configuration_error and not missing_configuration_method:
+        page.wait_for_function("!document.querySelector('#analyse-button').disabled")
     return page, errors
 
 
@@ -104,14 +154,29 @@ def test_quick_experiment_analysis_preview_and_stale_invalidation(
         validate_telemetry_json(json.dumps(submitted_payload), source="quick experiment")
         assert submitted_payload["limits"] == valid_payload["limits"]
         desktop_metrics = page.evaluate(
-            "metricDefinitions.map(({ key, label, unit }) => ({ key, label, unit }))"
+            """metricDefinitions.map(
+              ({ key, label, unit, report_decimals }) =>
+              ({ key, label, unit, report_decimals }))"""
         )
         assert desktop_metrics == [
-            {"key": metric.metric.value, "label": metric.label, "unit": metric.unit}
+            {
+                "key": metric.metric.value,
+                "label": metric.label,
+                "unit": metric.unit,
+                "report_decimals": metric.report_decimals,
+            }
             for metric in METRICS
         ]
+        assert page.locator("#quick-grid .control-card").count() == len(METRICS)
+        for metric in METRICS:
+            control = page.locator(f"#quick-{metric.slug}")
+            assert page.get_by_role("heading", name=metric.label, exact=True).count() == 1
+            assert float(control.input_value()) == metric.quick.default
+            assert float(control.get_attribute("min")) == metric.quick.minimum
+            assert float(control.get_attribute("max")) == metric.quick.maximum
+            assert float(control.get_attribute("step")) == metric.quick.step
 
-        page.locator("#quick-battery").fill("3.3")
+        page.locator("#quick-battery-voltage").fill("3.3")
 
         assert page.locator("#result-panel").is_hidden()
         assert page.locator("#save-report").is_disabled()
@@ -138,7 +203,7 @@ def test_inflight_analysis_is_discarded_after_inputs_change(
         page.wait_for_function("window.__releaseAnalysis !== null")
 
         if mutation == "edit":
-            page.locator("#quick-battery").fill("3.3")
+            page.locator("#quick-battery-voltage").fill("3.3")
         else:
             page.get_by_role("tab", name="Full Pass Editor").click()
             page.locator("#readings-body tr").first.wait_for()
@@ -170,7 +235,7 @@ def test_quick_reset_clears_validation_errors(
         page.evaluate("window.__forceValidationError = true")
         page.get_by_role("button", name="Validate & Analyze").click()
         page.locator("#error-summary").wait_for(state="visible")
-        assert page.locator("#quick-temperature").get_attribute("aria-invalid") == "true"
+        assert page.locator("#quick-temperature-c").get_attribute("aria-invalid") == "true"
 
         page.get_by_role("button", name="Reset values").click()
 
@@ -251,6 +316,136 @@ def test_desktop_ui_loads_only_packaged_local_resources(
         )
         assert resource_urls
         assert all(url.startswith("file:") for url in resource_urls)
+        assert errors == []
+    finally:
+        page.close()
+
+
+def test_configuration_failure_is_fatal_and_keeps_analysis_disabled(
+    chromium_browser: Any,
+    valid_payload: dict[str, object],
+) -> None:
+    page, errors = _open_app(
+        chromium_browser,
+        valid_payload,
+        configuration_error=True,
+    )
+    try:
+        page.locator("#error-summary").wait_for(state="visible")
+        assert page.locator("#analyse-button").is_disabled()
+        assert page.locator("#quick-grid > *").count() == 0
+        assert "initialization failed" in page.locator("#bridge-status").inner_text().lower()
+        assert "simulated configuration failure" in page.locator("#error-summary").inner_text()
+        assert errors == []
+    finally:
+        page.close()
+
+
+def test_missing_configuration_bridge_method_is_fatal(
+    chromium_browser: Any,
+    valid_payload: dict[str, object],
+) -> None:
+    page, errors = _open_app(
+        chromium_browser,
+        valid_payload,
+        missing_configuration_method=True,
+    )
+    try:
+        page.locator("#error-summary").wait_for(state="visible")
+        assert page.locator("#analyse-button").is_disabled()
+        assert "Python desktop bridge is unavailable" in page.locator("#error-summary").inner_text()
+        assert errors == []
+    finally:
+        page.close()
+
+
+def test_model_level_limit_error_marks_and_focuses_all_metric_controls(
+    chromium_browser: Any,
+    valid_payload: dict[str, object],
+) -> None:
+    page, errors = _open_app(chromium_browser, valid_payload)
+    try:
+        page.get_by_role("tab", name="Full Pass Editor").click()
+        page.locator("#readings-body tr").first.wait_for()
+        page.evaluate(
+            """window.__forceValidationError = true;
+               window.__validationIssues = [{
+                 path: 'limits.battery_voltage',
+                 message: 'Warning and critical limits are in the wrong order'
+               }];"""
+        )
+        page.get_by_role("button", name="Validate & Analyze").click()
+        page.locator("#error-summary").wait_for(state="visible")
+
+        for suffix in ("direction", "warning", "critical"):
+            assert (
+                page.locator(f"#limit-battery-voltage-{suffix}").get_attribute("aria-invalid")
+                == "true"
+            )
+        assert (
+            page.locator("#error-summary a").get_attribute("href")
+            == "#limit-battery-voltage-direction"
+        )
+        page.locator("#error-summary a").click()
+        assert page.locator("#limit-battery-voltage-direction").evaluate(
+            "element => element === document.activeElement"
+        )
+        assert errors == []
+    finally:
+        page.close()
+
+
+def test_latest_delayed_example_response_wins(
+    chromium_browser: Any,
+    valid_payload: dict[str, object],
+) -> None:
+    page, errors = _open_app(chromium_browser, valid_payload)
+    try:
+        page.get_by_role("tab", name="Full Pass Editor").click()
+        page.locator("#readings-body tr").first.wait_for()
+        page.evaluate("window.__heldExampleNames = ['nominal', 'anomalous']")
+
+        page.get_by_role("button", name="Nominal example").click()
+        page.wait_for_function("window.__releaseExamples.nominal !== undefined")
+        page.get_by_role("button", name="Anomalous example").click()
+        page.wait_for_function("window.__releaseExamples.anomalous !== undefined")
+
+        page.evaluate("window.__releaseExamples.anomalous()")
+        page.wait_for_function("document.querySelector('#full-pass-id').value === 'ANOMALOUS'")
+        page.evaluate("window.__releaseExamples.nominal()")
+        page.wait_for_timeout(50)
+
+        assert page.locator("#full-pass-id").input_value() == "ANOMALOUS"
+        assert errors == []
+    finally:
+        page.close()
+
+
+@pytest.mark.parametrize("mutation", ["edit", "mode"])
+def test_pending_import_is_invalidated_by_editor_change(
+    chromium_browser: Any,
+    valid_payload: dict[str, object],
+    mutation: str,
+) -> None:
+    page, errors = _open_app(chromium_browser, valid_payload)
+    try:
+        page.get_by_role("tab", name="Full Pass Editor").click()
+        page.locator("#readings-body tr").first.wait_for()
+        page.evaluate("window.__importCancelled = false; window.__holdImport = true")
+        page.get_by_role("button", name="Import JSON…").click()
+        page.wait_for_function("window.__releaseImport !== null")
+
+        if mutation == "edit":
+            page.locator("#full-pass-id").fill("USER-EDIT")
+        else:
+            page.get_by_role("tab", name="Quick Experiment").click()
+        page.evaluate("window.__releaseImport()")
+        page.wait_for_timeout(50)
+
+        if mutation == "edit":
+            assert page.locator("#full-pass-id").input_value() == "USER-EDIT"
+        else:
+            assert page.locator("#quick-tab").get_attribute("aria-selected") == "true"
         assert errors == []
     finally:
         page.close()

@@ -16,6 +16,7 @@ from telemetry_report.data import (
     validate_telemetry_json,
 )
 from telemetry_report.file_io import write_text_atomically
+from telemetry_report.metrics import METRICS
 from telemetry_report.presentation import render_report
 from telemetry_report.services import analyse_pass
 
@@ -93,6 +94,34 @@ class DesktopBridge:
     def bind_dialogs(self, dialogs: DesktopDialogs) -> None:
         """Attach native dialogs after pywebview has created its window."""
         self._dialogs = dialogs
+
+    def get_configuration(self) -> dict[str, object]:
+        """Return the Python-owned metric and Quick Experiment configuration."""
+        return {
+            "metrics": [
+                {
+                    "key": definition.metric.value,
+                    "slug": definition.slug,
+                    "label": definition.label,
+                    "unit": definition.unit,
+                    "report_decimals": definition.report_decimals,
+                    "average_note": definition.average_note,
+                    "quick": {
+                        "default": definition.quick.default,
+                        "minimum": definition.quick.minimum,
+                        "maximum": definition.quick.maximum,
+                        "step": definition.quick.step,
+                        "decimals": definition.quick.decimals,
+                    },
+                    "limit": {
+                        "direction": definition.default_limit.direction.value,
+                        "warning": definition.default_limit.warning,
+                        "critical": definition.default_limit.critical,
+                    },
+                }
+                for definition in METRICS
+            ]
+        }
 
     def load_example(self, name: str) -> dict[str, object]:
         """Return one packaged, validated example as normalized JSON."""

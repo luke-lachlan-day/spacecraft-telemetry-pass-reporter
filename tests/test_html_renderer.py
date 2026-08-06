@@ -7,10 +7,20 @@ from pathlib import Path
 
 import pytest
 
+import telemetry_report.presentation.html_renderer as html_renderer
 from telemetry_report.data import load_telemetry_pass
 from telemetry_report.domain import Status, TelemetryPass
 from telemetry_report.presentation import render_report
 from telemetry_report.services import analyse_pass
+
+
+def test_report_template_is_loaded_once_and_reused() -> None:
+    html_renderer._report_template.cache_clear()
+
+    first = html_renderer._report_template()
+    second = html_renderer._report_template()
+
+    assert first is second
 
 
 def test_report_contains_key_analysis_content(

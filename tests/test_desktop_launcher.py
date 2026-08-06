@@ -13,13 +13,40 @@ from telemetry_report.desktop.bridge import DesktopBridge
 
 
 class FakeWindow:
-    def __init__(self, responses: list[tuple[str, ...] | None] | None = None) -> None:
+    def __init__(
+        self,
+        responses: list[tuple[str, ...] | None] | None = None,
+        *,
+        loaded: bool = True,
+        smoke_value: object | None = None,
+        complete_evaluation: bool = True,
+    ) -> None:
         self.responses = responses or []
         self.calls: list[tuple[object, dict[str, object]]] = []
+        self.events = SimpleNamespace(loaded=SimpleNamespace(wait=lambda _timeout: loaded))
+        self.smoke_value = smoke_value or {
+            "result_visible": True,
+            "critical_status": True,
+            "preview_ready": True,
+            "save_ready": True,
+            "stale_result_cleared": True,
+            "stale_save_disabled": True,
+        }
+        self.complete_evaluation = complete_evaluation
+        self.evaluated_scripts: list[str] = []
+        self.destroyed = False
 
     def create_file_dialog(self, dialog_type: object, **kwargs: object) -> tuple[str, ...] | None:
         self.calls.append((dialog_type, kwargs))
         return self.responses.pop(0) if self.responses else None
+
+    def evaluate_js(self, script: str, *, callback: Any) -> None:
+        self.evaluated_scripts.append(script)
+        if self.complete_evaluation:
+            callback(self.smoke_value)
+
+    def destroy(self) -> None:
+        self.destroyed = True
 
 
 def _fake_webview(window: FakeWindow, *, fail_start: bool = False) -> ModuleType:
@@ -32,10 +59,16 @@ def _fake_webview(window: FakeWindow, *, fail_start: bool = False) -> ModuleType
         module.created.append((title, kwargs))
         return window
 
-    def start(**kwargs: object) -> None:
+    def start(
+        function: Any = None,
+        args: tuple[object, ...] | None = None,
+        **kwargs: object,
+    ) -> None:
         module.started.append(kwargs)
         if fail_start:
             raise RuntimeError("simulated WebView startup failure")
+        if function is not None:
+            function(*(args or ()))
 
     module.create_window = create_window
     module.start = start
@@ -216,6 +249,82 @@ def test_launch_gui_surfaces_startup_failure(monkeypatch: pytest.MonkeyPatch) ->
     assert "simulated WebView startup failure" in messages[0]
 
 
+def test_ui_smoke_test_uses_offscreen_window_and_cleans_up(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    window = FakeWindow()
+    module = _fake_webview(window)
+    monkeypatch.setattr(launcher.sys, "platform", "win32")
+    monkeypatch.setattr(launcher, "_webview2_runtime_version", lambda: "123")
+    monkeypatch.setitem(sys.modules, "webview", module)
+
+    assert launcher.main(["--ui-smoke-test"]) == 0
+    assert module.created[0][1]["x"] == -32000
+    assert module.created[0][1]["y"] == -32000
+    assert module.created[0][1]["focus"] is False
+    assert window.evaluated_scripts == [launcher._UI_SMOKE_SCRIPT]
+    assert window.destroyed is True
+    assert capsys.readouterr().out == "Desktop UI smoke test passed\n"
+
+
+def test_ui_smoke_test_reports_assertion_failure_and_cleans_up(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    window = FakeWindow(smoke_value={"critical_status": False})
+    module = _fake_webview(window)
+    monkeypatch.setattr(launcher.sys, "platform", "win32")
+    monkeypatch.setattr(launcher, "_webview2_runtime_version", lambda: "123")
+    monkeypatch.setitem(sys.modules, "webview", module)
+
+    assert launcher.main(["--ui-smoke-test"]) == 1
+    assert "critical_status" in capsys.readouterr().err
+    assert window.destroyed is True
+
+
+def test_ui_smoke_test_cleans_up_after_startup_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    window = FakeWindow()
+    module = _fake_webview(window, fail_start=True)
+    monkeypatch.setattr(launcher.sys, "platform", "win32")
+    monkeypatch.setattr(launcher, "_webview2_runtime_version", lambda: "123")
+    monkeypatch.setitem(sys.modules, "webview", module)
+
+    assert launcher.main(["--ui-smoke-test"]) == 3
+    assert "could not start" in capsys.readouterr().err
+    assert window.destroyed is True
+
+
+@pytest.mark.parametrize(
+    ("window", "message"),
+    [
+        (FakeWindow(loaded=False), "did not finish loading"),
+        (
+            FakeWindow(complete_evaluation=False),
+            "smoke script did not complete",
+        ),
+    ],
+)
+def test_ui_smoke_test_reports_timeouts_and_cleans_up(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    window: FakeWindow,
+    message: str,
+) -> None:
+    module = _fake_webview(window)
+    monkeypatch.setattr(launcher.sys, "platform", "win32")
+    monkeypatch.setattr(launcher, "_UI_SMOKE_TIMEOUT_SECONDS", 0.0)
+    monkeypatch.setattr(launcher, "_webview2_runtime_version", lambda: "123")
+    monkeypatch.setitem(sys.modules, "webview", module)
+
+    assert launcher.main(["--ui-smoke-test"]) == 1
+    assert message in capsys.readouterr().err
+    assert window.destroyed is True
+
+
 def test_desktop_main_reports_self_test_failure(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -228,7 +337,37 @@ def test_desktop_main_reports_self_test_failure(
     assert "simulated self-test failure" in capsys.readouterr().err
 
 
+def test_packaged_static_file_check_accepts_complete_bundle(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "LICENSE").write_text("license", encoding="utf-8")
+    (tmp_path / "README.txt").write_text("readme", encoding="utf-8")
+    monkeypatch.setattr(launcher.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(launcher.sys, "executable", str(tmp_path / "Telemetry Reporter.exe"))
+
+    launcher._validate_packaged_static_files()
+
+
+def test_packaged_static_file_check_reports_missing_files(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(launcher.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(launcher.sys, "executable", str(tmp_path / "Telemetry Reporter.exe"))
+
+    with pytest.raises(RuntimeError, match=r"LICENSE, README\.txt"):
+        launcher._validate_packaged_static_files()
+
+
 def test_desktop_main_delegates_normal_launch(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(launcher, "_launch_gui", lambda: 7)
+    monkeypatch.setattr(launcher, "_launch_gui", lambda **_kwargs: 7)
 
     assert launcher.main([]) == 7
+
+
+def test_diagnostic_options_are_mutually_exclusive() -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        launcher.main(["--self-test", "--ui-smoke-test"])
+
+    assert exc_info.value.code == 2
