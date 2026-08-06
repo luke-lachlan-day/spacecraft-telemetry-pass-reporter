@@ -328,27 +328,53 @@ function clearErrors() {
   document.querySelectorAll('[aria-invalid="true"]').forEach((element) => element.removeAttribute("aria-invalid"));
 }
 
-function showErrors(result) {
+function showErrorSummary(result, { title, status, linkFields }) {
   clearErrors();
+  byId("error-title").textContent = title;
   const issues = Array.isArray(result.issues) && result.issues.length
     ? result.issues
     : [{ path: "input", message: result.error || "The telemetry could not be analysed." }];
   issues.forEach((issue) => {
-    const targets = fieldTargetsForPath(issue.path);
-    targets.invalidIds.forEach((id) => {
-      const target = byId(id);
-      if (target) target.setAttribute("aria-invalid", "true");
-    });
     const item = document.createElement("li");
-    const link = document.createElement("a");
-    link.href = `#${targets.focusId}`;
-    link.textContent = `${issue.path}: ${issue.message}`;
-    item.append(link);
+    if (linkFields) {
+      const targets = fieldTargetsForPath(issue.path);
+      targets.invalidIds.forEach((id) => {
+        const target = byId(id);
+        if (target) target.setAttribute("aria-invalid", "true");
+      });
+      const link = document.createElement("a");
+      link.href = `#${targets.focusId}`;
+      link.textContent = `${issue.path}: ${issue.message}`;
+      item.append(link);
+    } else {
+      item.textContent = `${issue.path}: ${issue.message}`;
+    }
     byId("error-list").append(item);
   });
   byId("error-summary").hidden = false;
   byId("error-summary").focus();
-  setBridgeStatus("Validation found fields that need attention.");
+  setBridgeStatus(status);
+}
+
+function showErrors(result) {
+  showErrorSummary(result, {
+    title: "Please correct the highlighted telemetry",
+    status: "Validation found fields that need attention.",
+    linkFields: true,
+  });
+}
+
+function showLoadErrors(result, kind) {
+  const example = kind === "example";
+  showErrorSummary(result, {
+    title: example
+      ? "The bundled example could not be loaded"
+      : "The selected JSON could not be imported",
+    status: example
+      ? "Example loading failed. The current editor and analysis are unchanged."
+      : "Import failed. The current editor and analysis are unchanged.",
+    linkFields: false,
+  });
 }
 
 function showInitializationError(error) {
@@ -397,6 +423,7 @@ function renderResult(result) {
 async function analyseCurrent() {
   if (!state.initialized) return;
   clearErrors();
+  clearResult();
   setBusy(true, "Validating and analyzing with Python…");
   const submittedRevision = state.inputRevision;
   try {
@@ -434,10 +461,12 @@ async function loadExample(name) {
   try {
     const result = await callBridge("load_example", name);
     if (!editorRequestIsCurrent(request)) return;
-    if (!result.ok) showErrors(result);
+    if (!result.ok) showLoadErrors(result, "example");
     else setFullPayload(JSON.parse(result.payload_json));
   } catch (error) {
-    if (editorRequestIsCurrent(request)) showErrors({ error: error.message, issues: [] });
+    if (editorRequestIsCurrent(request)) {
+      showLoadErrors({ error: error.message, issues: [] }, "example");
+    }
   }
 }
 
@@ -447,11 +476,16 @@ async function importJson() {
   try {
     const result = await callBridge("open_input_json");
     if (!editorRequestIsCurrent(request)) return;
-    if (result.cancelled) setBridgeStatus("Import cancelled.");
-    else if (!result.ok) showErrors(result);
+    if (result.cancelled) {
+      setBridgeStatus(state.analysisId
+        ? "Import cancelled. The current analysis remains available."
+        : "Import cancelled. The editor is unchanged.");
+    } else if (!result.ok) showLoadErrors(result, "import");
     else setFullPayload(JSON.parse(result.payload_json));
   } catch (error) {
-    if (editorRequestIsCurrent(request)) showErrors({ error: error.message, issues: [] });
+    if (editorRequestIsCurrent(request)) {
+      showLoadErrors({ error: error.message, issues: [] }, "import");
+    }
   }
 }
 

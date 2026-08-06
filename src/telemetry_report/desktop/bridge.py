@@ -124,8 +124,7 @@ class DesktopBridge:
         }
 
     def load_example(self, name: str) -> dict[str, object]:
-        """Return one packaged, validated example as normalized JSON."""
-        self._latest = None
+        """Return a validated example without changing the latest analysis."""
         try:
             validated = validate_telemetry_json(_example_text(name), source=f"example:{name}")
         except (TelemetryDataError, ValueError) as error:
@@ -139,8 +138,7 @@ class DesktopBridge:
         }
 
     def open_input_json(self) -> dict[str, object]:
-        """Open and validate a telemetry JSON document selected by the user."""
-        self._latest = None
+        """Open validated editor data without changing the latest analysis."""
         if self._dialogs is None:
             return {"ok": False, "error": "native file dialogs are unavailable", "issues": []}
         path = self._dialogs.open_json()

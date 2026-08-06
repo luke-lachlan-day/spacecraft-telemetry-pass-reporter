@@ -131,14 +131,63 @@ def test_bridge_saves_only_latest_normalized_json_and_report(
     assert dialogs.suggested_report == "PASS-TEST-report.html"
 
 
-def test_bridge_dialog_cancellation_is_not_an_error(valid_payload: dict[str, object]) -> None:
-    bridge = DesktopBridge(FakeDialogs())
-
-    assert bridge.open_input_json() == {"ok": True, "cancelled": True}
+def test_cancelled_import_preserves_latest_analysis(
+    valid_payload: dict[str, object], tmp_path: Path
+) -> None:
+    json_path = tmp_path / "saved.json"
+    report_path = tmp_path / "saved.html"
+    bridge = DesktopBridge(FakeDialogs(json_path=json_path, report_path=report_path))
     analysis = bridge.analyse(_payload_json(valid_payload))
     analysis_id = str(analysis["analysis_id"])
-    assert bridge.save_input_json(analysis_id) == {"ok": True, "cancelled": True}
-    assert bridge.save_report(analysis_id) == {"ok": True, "cancelled": True}
+
+    assert bridge.open_input_json() == {"ok": True, "cancelled": True}
+    assert bridge.save_input_json(analysis_id)["ok"] is True
+    assert bridge.save_report(analysis_id)["ok"] is True
+    assert json_path.is_file()
+    assert report_path.is_file()
+
+
+def test_failed_editor_loads_preserve_latest_analysis(
+    valid_payload: dict[str, object], tmp_path: Path
+) -> None:
+    invalid_path = tmp_path / "invalid.json"
+    invalid_path.write_text("{}", encoding="utf-8")
+    report_path = tmp_path / "saved.html"
+    bridge = DesktopBridge(FakeDialogs(open_path=invalid_path, report_path=report_path))
+    analysis_id = str(bridge.analyse(_payload_json(valid_payload))["analysis_id"])
+
+    assert bridge.open_input_json()["ok"] is False
+    assert bridge.load_example("missing")["ok"] is False
+    assert bridge.save_report(analysis_id)["ok"] is True
+    assert report_path.is_file()
+
+
+def test_successful_editor_loads_do_not_replace_latest_analysis(
+    valid_payload: dict[str, object], tmp_path: Path
+) -> None:
+    input_path = tmp_path / "input.json"
+    input_path.write_text(_payload_json(valid_payload), encoding="utf-8")
+    report_path = tmp_path / "saved.html"
+    bridge = DesktopBridge(FakeDialogs(open_path=input_path, report_path=report_path))
+    analysis_id = str(bridge.analyse(_payload_json(valid_payload))["analysis_id"])
+
+    assert bridge.open_input_json()["ok"] is True
+    assert bridge.load_example("nominal")["ok"] is True
+    assert bridge.save_report(analysis_id)["ok"] is True
+
+
+def test_successful_analysis_retires_previous_analysis_id(
+    valid_payload: dict[str, object], tmp_path: Path
+) -> None:
+    bridge = DesktopBridge(FakeDialogs(report_path=tmp_path / "saved.html"))
+    first_id = str(bridge.analyse(_payload_json(valid_payload))["analysis_id"])
+    second_id = str(bridge.analyse(_payload_json(valid_payload))["analysis_id"])
+
+    assert bridge.save_report(first_id) == {
+        "ok": False,
+        "error": "analysis result is missing or stale",
+    }
+    assert bridge.save_report(second_id)["ok"] is True
 
 
 def test_bridge_rejects_file_operations_without_native_dialogs(

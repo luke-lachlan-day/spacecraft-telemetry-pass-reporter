@@ -31,6 +31,7 @@ def _stub_script(
       window.__holdAnalysis = false;
       window.__releaseAnalysis = null;
       window.__importCancelled = true;
+      window.__importFailure = false;
       window.__holdImport = false;
       window.__releaseImport = null;
       window.__heldExampleNames = [];
@@ -60,6 +61,14 @@ def _stub_script(
           if (window.__holdImport) await new Promise((resolve) => {{
             window.__releaseImport = resolve;
           }});
+          if (window.__importFailure) return {{
+            ok: false,
+            error: 'invalid imported telemetry',
+            issues: [{{
+              path: 'readings.0.temperature_c',
+              message: 'Input should be a valid number'
+            }}]
+          }};
           return window.__importCancelled
             ? {{ ok: true, cancelled: true }}
             : {{
@@ -95,12 +104,14 @@ def _stub_script(
             }}
           }};
         }},
-        save_input_json: async (id) => ({{
-          ok: true, cancelled: false, path: 'C:\\\\Reports\\\\input.json', id
-        }}),
-        save_report: async (id) => ({{
-          ok: true, cancelled: false, path: 'C:\\\\Reports\\\\report.html', id
-        }})
+        save_input_json: async (id) => {{
+          window.__bridgeCalls.push(['save_input_json', id]);
+          return {{ ok: true, cancelled: false, path: 'C:\\\\Reports\\\\input.json', id }};
+        }},
+        save_report: async (id) => {{
+          window.__bridgeCalls.push(['save_report', id]);
+          return {{ ok: true, cancelled: false, path: 'C:\\\\Reports\\\\report.html', id }};
+        }}
       }} }};
     """
 
@@ -225,6 +236,31 @@ def test_inflight_analysis_is_discarded_after_inputs_change(
         page.close()
 
 
+def test_reanalysis_hides_previous_result_until_completion(
+    chromium_browser: Any,
+    valid_payload: dict[str, object],
+) -> None:
+    page, errors = _open_app(chromium_browser, valid_payload)
+    try:
+        page.get_by_role("button", name="Validate & Analyze").click()
+        page.locator("#result-panel").wait_for(state="visible")
+
+        page.evaluate("window.__holdAnalysis = true")
+        page.get_by_role("button", name="Validate & Analyze").click()
+        page.wait_for_function("window.__releaseAnalysis !== null")
+
+        assert page.locator("#result-panel").is_hidden()
+        assert page.locator("#save-json").is_disabled()
+        assert page.locator("#save-report").is_disabled()
+
+        page.evaluate("window.__releaseAnalysis()")
+        page.locator("#result-panel").wait_for(state="visible")
+        assert page.locator("#save-report").is_enabled()
+        assert errors == []
+    finally:
+        page.close()
+
+
 def test_quick_reset_clears_validation_errors(
     chromium_browser: Any,
     browser_artifacts: Path,
@@ -301,6 +337,83 @@ def test_full_editor_examples_rows_errors_and_keyboard_tabs(
     except Exception:
         page.screenshot(path=browser_artifacts / "desktop-full-failure.png", full_page=True)
         raise
+    finally:
+        page.close()
+
+
+def test_cancelled_import_preserves_current_result_and_save_actions(
+    chromium_browser: Any,
+    valid_payload: dict[str, object],
+) -> None:
+    page, errors = _open_app(chromium_browser, valid_payload)
+    try:
+        page.get_by_role("tab", name="Full Pass Editor").click()
+        page.locator("#readings-body tr").first.wait_for()
+        page.get_by_role("button", name="Validate & Analyze").click()
+        page.locator("#result-panel").wait_for(state="visible")
+        preview = page.locator("#report-preview").get_attribute("srcdoc")
+
+        page.get_by_role("button", name="Import JSON…").click()
+        page.wait_for_function(
+            "document.querySelector('#bridge-status').innerText.includes('remains available')"
+        )
+
+        assert page.locator("#result-panel").is_visible()
+        assert page.locator("#report-preview").get_attribute("srcdoc") == preview
+        assert page.locator("#save-json").is_enabled()
+        assert page.locator("#save-report").is_enabled()
+
+        page.get_by_role("button", name="Save input JSON…").click()
+        page.wait_for_function(
+            "document.querySelector('#bridge-status').innerText.includes('input.json')"
+        )
+        page.get_by_role("button", name="Save HTML report…").click()
+        page.wait_for_function(
+            "document.querySelector('#bridge-status').innerText.includes('report.html')"
+        )
+        save_calls = page.evaluate(
+            "window.__bridgeCalls.filter(([method]) => method.startsWith('save_'))"
+        )
+        assert save_calls == [
+            ["save_input_json", "analysis-token"],
+            ["save_report", "analysis-token"],
+        ]
+
+        page.evaluate("window.__importCancelled = false")
+        page.get_by_role("button", name="Import JSON…").click()
+        page.wait_for_function("document.querySelector('#full-pass-id').value === 'IMPORTED'")
+        assert page.locator("#result-panel").is_hidden()
+        assert page.locator("#save-report").is_disabled()
+        assert errors == []
+    finally:
+        page.close()
+
+
+def test_invalid_import_preserves_current_editor_and_analysis(
+    chromium_browser: Any,
+    valid_payload: dict[str, object],
+) -> None:
+    page, errors = _open_app(chromium_browser, valid_payload)
+    try:
+        page.get_by_role("tab", name="Full Pass Editor").click()
+        page.locator("#readings-body tr").first.wait_for()
+        page.get_by_role("button", name="Validate & Analyze").click()
+        page.locator("#result-panel").wait_for(state="visible")
+        pass_id = page.locator("#full-pass-id").input_value()
+
+        page.evaluate("window.__importFailure = true")
+        page.get_by_role("button", name="Import JSON…").click()
+        page.locator("#error-summary").wait_for(state="visible")
+
+        assert page.locator("#error-title").inner_text() == (
+            "The selected JSON could not be imported"
+        )
+        assert page.locator("#full-pass-id").input_value() == pass_id
+        assert page.locator("#result-panel").is_visible()
+        assert page.locator("#save-report").is_enabled()
+        assert page.locator('[aria-invalid="true"]').count() == 0
+        assert page.locator("#error-summary a").count() == 0
+        assert errors == []
     finally:
         page.close()
 
