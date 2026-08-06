@@ -241,11 +241,13 @@ command reproduces the checked-in anomalous report. A dedicated Chromium job che
 320, 375, and 1440 pixels, print media/PDF output, accessibility-oriented UI behavior, and browser
 errors. Screenshots and the PDF are uploaded as short-lived artifacts only when that job fails.
 
-The Windows release workflow uses Windows x64 CPython 3.13.15 and the committed hash lock, verifies
-the resolved environment with `pip check`, and builds the committed one-folder PyInstaller
-specification. It runs both packaged diagnostic modes with process timeouts, verifies the ZIP
-checksum, and publishes a versioned ZIP, checksum, and build-information file. Published asset
-names are immutable: the workflow fails on a collision and never replaces an earlier release.
+The Windows release workflow calls the complete Quality workflow as a required gate. Only after the
+Python matrix, package smoke, and Chromium jobs pass does it use Windows x64 CPython 3.13.15 and the
+committed hash lock, verify the resolved environment with `pip check`, and build the committed
+one-folder PyInstaller specification. It runs both packaged diagnostic modes with process timeouts,
+verifies the ZIP checksum, and publishes a versioned ZIP, checksum, and build-information file.
+Published asset names are immutable: the workflow fails on a collision and never replaces an
+earlier release.
 
 For a matching manual build, first confirm `py -3.13-64 --version` reports Python 3.13.15, then run:
 
