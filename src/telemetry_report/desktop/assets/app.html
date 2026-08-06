@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Spacecraft Telemetry Pass Reporter</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="app-header">
+    <div>
+      <p class="eyebrow">Interactive telemetry lab</p>
+      <h1>Spacecraft Telemetry Pass Reporter</h1>
+      <p class="lede">Adjust fictional readings, validate them with the Python analyser, and save a portable HTML report.</p>
+    </div>
+    <span class="local-badge">Runs locally</span>
+  </header>
+
+  <main class="app-shell">
+    <nav class="mode-tabs" role="tablist" aria-label="Editor mode">
+      <button id="quick-tab" class="mode-tab active" type="button" role="tab" aria-selected="true" aria-controls="quick-panel">Quick Experiment</button>
+      <button id="full-tab" class="mode-tab" type="button" role="tab" aria-selected="false" aria-controls="full-panel" tabindex="-1">Full Pass Editor</button>
+    </nav>
+
+    <section id="error-summary" class="error-summary" tabindex="-1" aria-labelledby="error-title" hidden>
+      <h2 id="error-title">Please correct the highlighted telemetry</h2>
+      <ul id="error-list"></ul>
+    </section>
+
+    <section id="quick-panel" class="editor-panel" role="tabpanel" aria-labelledby="quick-tab">
+      <div class="section-heading">
+        <div>
+          <p class="step-label">Approachable mode</p>
+          <h2>Try one reading</h2>
+          <p>Move the controls across the displayed limits, then ask the real analyser to classify the reading.</p>
+        </div>
+        <button id="quick-reset" class="button secondary" type="button">Reset values</button>
+      </div>
+
+      <div class="quick-grid">
+        <article class="control-card">
+          <div class="control-heading">
+            <div><h3>Battery voltage</h3><p>Healthy voltage stays above the configured minimum.</p></div>
+            <output id="quick-battery-output" for="quick-battery-range quick-battery">3.80 V</output>
+          </div>
+          <label class="sr-only" for="quick-battery-range">Battery voltage slider</label>
+          <input id="quick-battery-range" type="range" min="3" max="4.2" step="0.01" value="3.8">
+          <div class="number-row">
+            <label for="quick-battery">Exact value</label>
+            <div class="input-with-unit"><input id="quick-battery" type="number" min="3" max="4.2" step="0.01" value="3.8"><span>V</span></div>
+          </div>
+          <p class="limit-note"><strong>Warning ≤ 3.60 V</strong><span>Critical ≤ 3.40 V</span></p>
+        </article>
+
+        <article class="control-card">
+          <div class="control-heading">
+            <div><h3>Temperature</h3><p>Higher temperatures move toward the unsafe range.</p></div>
+            <output id="quick-temperature-output" for="quick-temperature-range quick-temperature">25.0 °C</output>
+          </div>
+          <label class="sr-only" for="quick-temperature-range">Temperature slider</label>
+          <input id="quick-temperature-range" type="range" min="-20" max="80" step="0.1" value="25">
+          <div class="number-row">
+            <label for="quick-temperature">Exact value</label>
+            <div class="input-with-unit"><input id="quick-temperature" type="number" min="-20" max="80" step="0.1" value="25"><span>°C</span></div>
+          </div>
+          <p class="limit-note"><strong>Warning ≥ 40.0 °C</strong><span>Critical ≥ 50.0 °C</span></p>
+        </article>
+
+        <article class="control-card">
+          <div class="control-heading">
+            <div><h3>Signal strength</h3><p>More-negative dBm values indicate a weaker signal.</p></div>
+            <output id="quick-signal-output" for="quick-signal-range quick-signal">−80 dBm</output>
+          </div>
+          <label class="sr-only" for="quick-signal-range">Signal strength slider</label>
+          <input id="quick-signal-range" type="range" min="-120" max="-40" step="1" value="-80">
+          <div class="number-row">
+            <label for="quick-signal">Exact value</label>
+            <div class="input-with-unit"><input id="quick-signal" type="number" min="-120" max="-40" step="1" value="-80"><span>dBm</span></div>
+          </div>
+          <p class="limit-note"><strong>Warning ≤ −90 dBm</strong><span>Critical ≤ −105 dBm</span></p>
+        </article>
+      </div>
+    </section>
+
+    <section id="full-panel" class="editor-panel" role="tabpanel" aria-labelledby="full-tab" hidden>
+      <div class="section-heading">
+        <div>
+          <p class="step-label">Advanced mode</p>
+          <h2>Edit a complete telemetry pass</h2>
+          <p>Configure metadata, operating limits, and a strictly chronological list of readings.</p>
+        </div>
+        <div class="button-group" aria-label="Load telemetry">
+          <button class="button secondary example-button" type="button" data-example="nominal">Nominal example</button>
+          <button class="button secondary example-button" type="button" data-example="anomalous">Anomalous example</button>
+          <button id="import-json" class="button secondary" type="button">Import JSON…</button>
+        </div>
+      </div>
+
+      <fieldset class="form-section">
+        <legend>Pass metadata</legend>
+        <div class="field-grid metadata-grid">
+          <div class="field"><label for="full-pass-id">Pass ID</label><input id="full-pass-id" type="text" maxlength="100"></div>
+          <div class="field"><label for="full-spacecraft">Spacecraft</label><input id="full-spacecraft" type="text" maxlength="100"></div>
+          <div class="field wide"><label for="full-started-at">Started at</label><input id="full-started-at" type="text" spellcheck="false" aria-describedby="timestamp-help"><p id="timestamp-help" class="field-help">ISO 8601 with a UTC offset, for example 2026-08-05T09:30:00+09:30.</p></div>
+        </div>
+      </fieldset>
+
+      <fieldset class="form-section">
+        <legend>Operating limits</legend>
+        <div id="limits-grid" class="limits-grid"></div>
+      </fieldset>
+
+      <fieldset class="form-section readings-section">
+        <legend>Chronological readings</legend>
+        <div class="readings-toolbar">
+          <p>Each row must be later than the previous row; the first timestamp must equal <strong>Started at</strong>.</p>
+          <button id="add-reading" class="button secondary" type="button">Add reading</button>
+        </div>
+        <div class="readings-wrapper">
+          <table>
+            <thead><tr><th>Timestamp</th><th>Battery (V)</th><th>Temperature (°C)</th><th>Signal (dBm)</th><th aria-label="Row actions"></th></tr></thead>
+            <tbody id="readings-body"></tbody>
+          </table>
+        </div>
+      </fieldset>
+    </section>
+
+    <section class="action-panel" aria-label="Analysis actions">
+      <div><strong>Ready to analyse?</strong><span id="bridge-status" role="status" aria-live="polite">The Python engine is ready.</span></div>
+      <button id="analyse-button" class="button primary" type="button">Validate &amp; Analyze</button>
+    </section>
+
+    <section id="result-panel" class="result-panel" aria-labelledby="result-title" hidden>
+      <div class="result-heading">
+        <div>
+          <p class="step-label">Authoritative result</p>
+          <div class="result-title-row"><h2 id="result-title" tabindex="-1">Pass analysis</h2><span id="overall-status" class="status-badge"></span></div>
+          <p id="operational-summary"></p>
+        </div>
+        <div class="button-group">
+          <button id="save-json" class="button secondary" type="button" disabled>Save input JSON…</button>
+          <button id="save-report" class="button primary" type="button" disabled>Save HTML report…</button>
+        </div>
+      </div>
+      <div class="result-counts" aria-label="Reading counts by severity">
+        <div class="count nominal"><strong id="nominal-count">0</strong><span>Nominal</span></div>
+        <div class="count warning"><strong id="warning-count">0</strong><span>Warning</span></div>
+        <div class="count critical"><strong id="critical-count">0</strong><span>Critical</span></div>
+      </div>
+      <div id="quick-statuses" class="quick-statuses" hidden></div>
+      <div class="preview-heading"><h3>Generated report preview</h3><p>The preview is sandboxed and contains no scripts or network resources.</p></div>
+      <iframe id="report-preview" title="Generated telemetry report preview" sandbox></iframe>
+    </section>
+  </main>
+
+  <footer class="app-footer">Fictional demonstration data for software-engineering education. Not intended for mission use.</footer>
+  <script src="app.js"></script>
+</body>
+</html>

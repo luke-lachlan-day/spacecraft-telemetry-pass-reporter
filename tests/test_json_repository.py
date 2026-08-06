@@ -7,7 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from telemetry_report.data import TelemetryDataError, load_telemetry_pass
+from telemetry_report.data import (
+    TelemetryDataError,
+    load_telemetry_pass,
+    validate_telemetry_json,
+)
 from telemetry_report.data.json_repository import _MAX_INPUT_BYTES
 from telemetry_report.data.schemas import _MAX_READINGS
 from telemetry_report.domain import LimitDirection
@@ -53,6 +57,34 @@ def test_load_maps_valid_json_to_domain(tmp_path: Path, valid_payload: dict[str,
     assert telemetry_pass.started_at.utcoffset() is not None
     assert len(telemetry_pass.readings) == 2
     assert telemetry_pass.limits.battery_voltage.direction is LimitDirection.MINIMUM
+
+
+def test_in_memory_validation_returns_normalized_payload(
+    valid_payload: dict[str, object],
+) -> None:
+    valid_payload["pass_id"] = "  PASS-TEST  "
+
+    validated = validate_telemetry_json(json.dumps(valid_payload))
+
+    assert validated.telemetry_pass.pass_id == "PASS-TEST"
+    assert validated.payload["pass_id"] == "PASS-TEST"
+
+
+def test_in_memory_validation_exposes_structured_field_issues(
+    valid_payload: dict[str, object],
+) -> None:
+    readings = valid_payload["readings"]
+    assert isinstance(readings, list)
+    assert isinstance(readings[0], dict)
+    readings[0]["temperature_c"] = "not-a-number"
+
+    with pytest.raises(TelemetryDataError) as caught:
+        validate_telemetry_json(json.dumps(valid_payload))
+
+    assert caught.value.issues
+    assert caught.value.issues[0].path == "readings.0.temperature_c"
+    assert "number" in caught.value.issues[0].message
+    assert "readings.0.temperature_c" in str(caught.value)
 
 
 def test_load_reports_missing_file_without_leaking_os_exception(tmp_path: Path) -> None:

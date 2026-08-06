@@ -132,7 +132,7 @@ def test_cli_preserves_existing_report_when_atomic_replace_fails(
     def fail_replace(_source: object, _destination: object) -> None:
         raise OSError("simulated replacement failure")
 
-    monkeypatch.setattr("telemetry_report.cli.os.replace", fail_replace)
+    monkeypatch.setattr("telemetry_report.file_io.os.replace", fail_replace)
 
     assert main([str(input_path), "--output", str(output_path)]) == 3
     assert output_path.read_text(encoding="utf-8") == "existing report"
@@ -206,7 +206,7 @@ def test_cli_retries_temporary_file_name_collision(
     _write_payload(input_path, valid_payload)
     collision_path.write_text("keep me", encoding="utf-8")
     tokens = iter(("collision", "available"))
-    monkeypatch.setattr("telemetry_report.cli.secrets.token_hex", lambda _size: next(tokens))
+    monkeypatch.setattr("telemetry_report.file_io.secrets.token_hex", lambda _size: next(tokens))
 
     assert main([str(input_path), "--output", str(output_path)]) == 0
 
