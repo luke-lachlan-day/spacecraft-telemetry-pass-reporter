@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "spacecraft-telemetry-pass-reporter"
-version = "1.0.0"
+version = "1.0.1"
 description = "Generate polished HTML reports from fictional spacecraft-pass telemetry."
 readme = "README.md"
 requires-python = ">=3.11"

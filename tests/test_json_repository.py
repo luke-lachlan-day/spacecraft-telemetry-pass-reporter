@@ -2,16 +2,45 @@ from __future__ import annotations
 
 import copy
 import json
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
 
 from telemetry_report.data import TelemetryDataError, load_telemetry_pass
+from telemetry_report.data.json_repository import _MAX_INPUT_BYTES
+from telemetry_report.data.schemas import _MAX_READINGS
 from telemetry_report.domain import LimitDirection
 
 
 def _write_payload(path: Path, payload: dict[str, object]) -> None:
     path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _write_padded_payload(path: Path, payload: dict[str, object], size: int) -> None:
+    encoded_payload = json.dumps(payload).encode("utf-8")
+    assert len(encoded_payload) <= size
+    path.write_bytes(encoded_payload + b" " * (size - len(encoded_payload)))
+
+
+def _payload_with_reading_count(payload: dict[str, object], count: int) -> dict[str, object]:
+    result = copy.deepcopy(payload)
+    started_at_value = result["started_at"]
+    readings = result["readings"]
+    assert isinstance(started_at_value, str)
+    assert isinstance(readings, list)
+    assert readings
+    assert isinstance(readings[0], dict)
+    started_at = datetime.fromisoformat(started_at_value)
+    first_reading = readings[0]
+    result["readings"] = [
+        {
+            **first_reading,
+            "timestamp": (started_at + timedelta(seconds=index)).isoformat(),
+        }
+        for index in range(count)
+    ]
+    return result
 
 
 def test_load_maps_valid_json_to_domain(tmp_path: Path, valid_payload: dict[str, object]) -> None:
@@ -36,6 +65,27 @@ def test_load_reports_invalid_utf8_as_data_error(tmp_path: Path) -> None:
     input_path.write_bytes(b"\xff\xfe")
 
     with pytest.raises(TelemetryDataError, match="file must be UTF-8 encoded"):
+        load_telemetry_pass(input_path)
+
+
+def test_load_accepts_file_at_input_size_limit(
+    tmp_path: Path, valid_payload: dict[str, object]
+) -> None:
+    input_path = tmp_path / "maximum-size.json"
+    _write_padded_payload(input_path, valid_payload, _MAX_INPUT_BYTES)
+
+    telemetry_pass = load_telemetry_pass(input_path)
+
+    assert telemetry_pass.pass_id == "PASS-TEST"
+
+
+def test_load_rejects_file_over_input_size_limit(
+    tmp_path: Path, valid_payload: dict[str, object]
+) -> None:
+    input_path = tmp_path / "oversized.json"
+    _write_padded_payload(input_path, valid_payload, _MAX_INPUT_BYTES + 1)
+
+    with pytest.raises(TelemetryDataError, match="file exceeds the 5 MiB input limit"):
         load_telemetry_pass(input_path)
 
 
@@ -120,6 +170,29 @@ def test_load_rejects_invalid_timelines(
     _write_payload(input_path, payload)
 
     with pytest.raises(TelemetryDataError, match=message):
+        load_telemetry_pass(input_path)
+
+
+def test_load_accepts_maximum_reading_count(
+    tmp_path: Path, valid_payload: dict[str, object]
+) -> None:
+    payload = _payload_with_reading_count(valid_payload, _MAX_READINGS)
+    input_path = tmp_path / "maximum-readings.json"
+    _write_payload(input_path, payload)
+
+    telemetry_pass = load_telemetry_pass(input_path)
+
+    assert len(telemetry_pass.readings) == _MAX_READINGS
+
+
+def test_load_rejects_excessive_reading_count(
+    tmp_path: Path, valid_payload: dict[str, object]
+) -> None:
+    payload = _payload_with_reading_count(valid_payload, _MAX_READINGS + 1)
+    input_path = tmp_path / "too-many-readings.json"
+    _write_payload(input_path, payload)
+
+    with pytest.raises(TelemetryDataError, match="at most 10000 items"):
         load_telemetry_pass(input_path)
 
 

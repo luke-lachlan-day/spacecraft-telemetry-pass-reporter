@@ -9,6 +9,7 @@ import pytest
 
 from telemetry_report import __version__
 from telemetry_report.cli import main
+from telemetry_report.data.json_repository import _MAX_INPUT_BYTES
 
 
 def _write_payload(path: Path, payload: dict[str, object]) -> None:
@@ -151,6 +152,22 @@ def test_cli_reports_invalid_utf8_without_traceback(
     assert captured.out == ""
     assert "file must be UTF-8 encoded" in captured.err
     assert "Traceback" not in captured.err
+
+
+def test_cli_rejects_oversized_input_without_writing_report(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    input_path = tmp_path / "oversized.json"
+    output_path = tmp_path / "report.html"
+    input_path.write_bytes(b" " * (_MAX_INPUT_BYTES + 1))
+
+    assert main([str(input_path), "--output", str(output_path)]) == 2
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "file exceeds the 5 MiB input limit" in captured.err
+    assert "Traceback" not in captured.err
+    assert not output_path.exists()
 
 
 def test_package_version_comes_from_distribution_metadata() -> None:

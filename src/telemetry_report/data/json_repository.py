@@ -9,6 +9,8 @@ from pydantic import ValidationError
 from telemetry_report.data.schemas import TelemetryPassSchema
 from telemetry_report.domain.models import TelemetryPass
 
+_MAX_INPUT_BYTES = 5 * 1024 * 1024
+
 
 class TelemetryDataError(Exception):
     """An expected, user-actionable failure while loading telemetry data."""
@@ -25,13 +27,22 @@ def _validation_message(error: ValidationError) -> str:
 def load_telemetry_pass(path: Path) -> TelemetryPass:
     """Read ``path``, validate its JSON, and return immutable domain data."""
     try:
-        raw_input = path.read_text(encoding="utf-8")
+        with path.open("rb") as input_file:
+            encoded_input = input_file.read(_MAX_INPUT_BYTES + 1)
+    except OSError as error:
+        raise TelemetryDataError(f"could not read '{path}': {error}") from error
+
+    if len(encoded_input) > _MAX_INPUT_BYTES:
+        raise TelemetryDataError(
+            f"invalid telemetry data in '{path}': file exceeds the 5 MiB input limit"
+        )
+
+    try:
+        raw_input = encoded_input.decode("utf-8")
     except UnicodeDecodeError as error:
         raise TelemetryDataError(
             f"invalid telemetry data in '{path}': file must be UTF-8 encoded"
         ) from error
-    except OSError as error:
-        raise TelemetryDataError(f"could not read '{path}': {error}") from error
 
     try:
         schema = TelemetryPassSchema.model_validate_json(raw_input)

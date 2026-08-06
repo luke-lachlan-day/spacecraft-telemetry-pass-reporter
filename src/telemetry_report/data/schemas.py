@@ -15,6 +15,8 @@ from telemetry_report.domain.models import (
     TelemetryReading,
 )
 
+_MAX_READINGS = 10_000
+
 
 class InputModel(BaseModel):
     """Strict base configuration shared by all input schemas."""
@@ -90,7 +92,7 @@ class TelemetryPassSchema(InputModel):
     spacecraft: str = Field(min_length=1, max_length=100)
     started_at: AwareDatetime
     limits: LimitsSchema
-    readings: list[ReadingSchema] = Field(min_length=1)
+    readings: list[ReadingSchema] = Field(min_length=1, max_length=_MAX_READINGS)
 
     @model_validator(mode="after")
     def readings_form_valid_timeline(self) -> Self:

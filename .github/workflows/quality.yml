@@ -39,3 +39,36 @@ jobs:
 
       - name: Test with coverage
         run: pytest
+
+  package-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Build wheel
+        run: python -m pip wheel --no-deps --wheel-dir dist .
+
+      - name: Create clean virtual environment
+        run: python -m venv .package-smoke
+
+      - name: Install and check wheel
+        run: |
+          .package-smoke/bin/python -m pip install dist/spacecraft_telemetry_pass_reporter-*.whl
+          .package-smoke/bin/python -m pip check
+
+      - name: Generate report from installed command
+        run: >-
+          .package-smoke/bin/telemetry-report sample-data/anomalous-pass.json
+          --output .package-smoke/anomalous-pass-report.html
+
+      - name: Compare packaged report with checked-in example
+        run: >-
+          cmp --silent .package-smoke/anomalous-pass-report.html
+          examples/anomalous-pass-report.html

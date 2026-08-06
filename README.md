@@ -14,6 +14,17 @@ Two generated examples are included:
 - [`examples/nominal-pass-report.html`](examples/nominal-pass-report.html)
 - [`examples/anomalous-pass-report.html`](examples/anomalous-pass-report.html)
 
+## Supported interface
+
+The supported public interface is the `telemetry-report` command (including its equivalent
+`python -m telemetry_report` entry point), the documented JSON input contract, the exit codes, and
+the generated report behaviour. Importable `telemetry_report.*` modules and domain types are
+implementation details and may change without compatibility aliases.
+
+The distribution retains PEP 561 type information so the implementation remains useful to inspect
+with type-aware tooling. That marker does not make the internal Python modules a compatibility-stable
+library API.
+
 ## Architecture
 
 The package deliberately uses four small layers, wired together by a small CLI:
@@ -133,6 +144,8 @@ Input files must be UTF-8 encoded. Timestamps must be ISO 8601 strings that incl
 numeric epoch timestamps are rejected. Readings must be non-empty, unique, and strictly
 chronological, and `started_at` must equal the first reading timestamp. Numeric values must be
 finite JSON numbers: booleans and numeric strings are rejected. Unknown fields are also rejected.
+Input files may be at most 5 MiB (5,242,880 bytes), and each pass may contain at most 10,000
+readings.
 
 For a `minimum` rule, values at or below the warning threshold are warnings and values at or below
 critical are critical. For a `maximum` rule, values at or above warning are warnings and values at
@@ -153,7 +166,9 @@ pytest
 To apply formatting before checking, run `ruff format .`.
 
 The GitHub Actions workflow runs formatting, linting, mypy, and the complete coverage-enabled test
-suite on Python 3.11, 3.12, 3.13, and 3.14.
+suite on Python 3.11, 3.12, 3.13, and 3.14. A separate Python 3.11 job builds the wheel, installs it
+into a clean virtual environment, checks its dependencies, and verifies that the installed console
+command reproduces the checked-in anomalous report.
 
 ## Design decisions and trade-offs
 
