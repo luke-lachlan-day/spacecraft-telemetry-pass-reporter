@@ -17,22 +17,28 @@ Two generated examples are included:
 
 ## Download the Windows app
 
-For the simplest route, download
-[`spacecraft-telemetry-pass-reporter-1.1.0-windows-x64.zip`](https://github.com/luke-lachlan-day/spacecraft-telemetry-pass-reporter/releases/latest)
-and its matching `.sha256` file from the latest GitHub Release. Verify the checksum, extract the
-whole ZIP, and run `Telemetry Reporter.exe`; the adjacent `_internal` folder must remain in place.
-Python is not required.
+For the simplest route, open the
+[latest GitHub Release](https://github.com/luke-lachlan-day/spacecraft-telemetry-pass-reporter/releases/latest)
+and download the versioned `spacecraft-telemetry-pass-reporter-*-windows-x64.zip` file and its
+matching `.sha256` file. Verify the checksum, extract the whole ZIP, and run
+`Telemetry Reporter.exe`; the adjacent `_internal` folder must remain in place. Python is not
+required.
 
-On PowerShell, `(Get-FileHash .\spacecraft-telemetry-pass-reporter-1.1.0-windows-x64.zip
--Algorithm SHA256).Hash` should match the first value in the downloaded `.sha256` file.
+On PowerShell, this prints a hash that should match the first value in the downloaded `.sha256`
+file:
+
+```powershell
+Get-ChildItem .\spacecraft-telemetry-pass-reporter-*-windows-x64.zip |
+  Get-FileHash -Algorithm SHA256
+```
 
 The portable build supports Windows 10/11 x64 and uses the Microsoft Edge WebView2 Runtime. Current
 Windows installations normally include it. If it is missing, the application offers to open the
 [official Microsoft download page](https://developer.microsoft.com/microsoft-edge/webview2/); it
 never falls back to the deprecated MSHTML renderer.
 
-Version 1.1.0 is portable and unsigned. Windows SmartScreen may show an unrecognized-app warning,
-so verify the published SHA-256 checksum before choosing to run it. There is no installer,
+The portable release is unsigned. Windows SmartScreen may show an unrecognized-app warning, so
+verify the published SHA-256 checksum before choosing to run it. There is no installer,
 auto-updater, account, network service, telemetry collection, or persistence beyond files you
 explicitly save.
 

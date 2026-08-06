@@ -1,5 +1,5 @@
-Spacecraft Telemetry Pass Reporter 1.1.0 - Windows x64
-======================================================
+Spacecraft Telemetry Pass Reporter - Windows x64
+================================================
 
 Run "Telemetry Reporter.exe" from this folder. Keep the _internal folder beside
 the executable; both are required. No Python installation or network connection
