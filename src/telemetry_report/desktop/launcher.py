@@ -116,7 +116,10 @@ def _webview2_runtime_version() -> str | None:
 
 def _native_message(message: str, *, question: bool = False) -> bool:
     flags = 0x30 | (0x04 if question else 0x00)
-    result = ctypes.windll.user32.MessageBoxW(None, message, "Telemetry Reporter", flags)
+    windll = getattr(ctypes, "windll", None)
+    if windll is None:
+        raise RuntimeError("native Windows message dialogs are unavailable")
+    result = windll.user32.MessageBoxW(None, message, "Telemetry Reporter", flags)
     return bool(question and result == 6)
 
 

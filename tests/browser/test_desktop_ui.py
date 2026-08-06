@@ -6,6 +6,9 @@ from typing import Any
 
 import pytest
 
+from telemetry_report.data import validate_telemetry_json
+from telemetry_report.presentation.html_renderer import METRICS
+
 pytestmark = pytest.mark.browser
 
 
@@ -14,6 +17,9 @@ def _stub_script(payload: dict[str, object]) -> str:
     report_html = "<!doctype html><html><body><h1>Generated report</h1></body></html>"
     return f"""
       window.__forceValidationError = false;
+      window.__holdAnalysis = false;
+      window.__releaseAnalysis = null;
+      window.__importCancelled = true;
       window.__bridgeCalls = [];
       const examplePayload = {payload_json};
       window.pywebview = {{ api: {{
@@ -21,9 +27,14 @@ def _stub_script(payload: dict[str, object]) -> str:
           window.__bridgeCalls.push(['load_example', name]);
           return {{ ok: true, cancelled: false, payload_json: JSON.stringify(examplePayload) }};
         }},
-        open_input_json: async () => ({{ ok: true, cancelled: true }}),
+        open_input_json: async () => window.__importCancelled
+          ? ({{ ok: true, cancelled: true }})
+          : ({{ ok: true, cancelled: false, payload_json: JSON.stringify(examplePayload) }}),
         analyse: async (raw) => {{
           window.__bridgeCalls.push(['analyse', JSON.parse(raw)]);
+          if (window.__holdAnalysis) await new Promise((resolve) => {{
+            window.__releaseAnalysis = resolve;
+          }});
           if (window.__forceValidationError) return {{
             ok: false,
             error: 'invalid telemetry',
@@ -89,6 +100,17 @@ def test_quick_experiment_analysis_preview_and_stale_invalidation(
         assert page.locator("#report-preview").get_attribute("sandbox") == ""
         assert page.get_by_role("button", name="Save HTML report…").is_enabled()
 
+        submitted_payload = page.evaluate("window.__bridgeCalls[0][1]")
+        validate_telemetry_json(json.dumps(submitted_payload), source="quick experiment")
+        assert submitted_payload["limits"] == valid_payload["limits"]
+        desktop_metrics = page.evaluate(
+            "metricDefinitions.map(({ key, label, unit }) => ({ key, label, unit }))"
+        )
+        assert desktop_metrics == [
+            {"key": metric.metric.value, "label": metric.label, "unit": metric.unit}
+            for metric in METRICS
+        ]
+
         page.locator("#quick-battery").fill("3.3")
 
         assert page.locator("#result-panel").is_hidden()
@@ -97,6 +119,66 @@ def test_quick_experiment_analysis_preview_and_stale_invalidation(
         assert errors == []
     except Exception:
         page.screenshot(path=browser_artifacts / "desktop-quick-failure.png", full_page=True)
+        raise
+    finally:
+        page.close()
+
+
+@pytest.mark.parametrize("mutation", ["edit", "mode"])
+def test_inflight_analysis_is_discarded_after_inputs_change(
+    chromium_browser: Any,
+    browser_artifacts: Path,
+    valid_payload: dict[str, object],
+    mutation: str,
+) -> None:
+    page, errors = _open_app(chromium_browser, valid_payload)
+    try:
+        page.evaluate("window.__holdAnalysis = true")
+        page.get_by_role("button", name="Validate & Analyze").click()
+        page.wait_for_function("window.__releaseAnalysis !== null")
+
+        if mutation == "edit":
+            page.locator("#quick-battery").fill("3.3")
+        else:
+            page.get_by_role("tab", name="Full Pass Editor").click()
+            page.locator("#readings-body tr").first.wait_for()
+
+        page.evaluate("window.__releaseAnalysis()")
+        page.wait_for_function("!document.querySelector('#analyse-button').disabled")
+
+        assert page.locator("#result-panel").is_hidden()
+        assert page.locator("#save-json").is_disabled()
+        assert page.locator("#save-report").is_disabled()
+        assert "changed while analysis was running" in page.locator("#bridge-status").inner_text()
+        assert errors == []
+    except Exception:
+        page.screenshot(
+            path=browser_artifacts / f"desktop-stale-{mutation}-failure.png", full_page=True
+        )
+        raise
+    finally:
+        page.close()
+
+
+def test_quick_reset_clears_validation_errors(
+    chromium_browser: Any,
+    browser_artifacts: Path,
+    valid_payload: dict[str, object],
+) -> None:
+    page, errors = _open_app(chromium_browser, valid_payload)
+    try:
+        page.evaluate("window.__forceValidationError = true")
+        page.get_by_role("button", name="Validate & Analyze").click()
+        page.locator("#error-summary").wait_for(state="visible")
+        assert page.locator("#quick-temperature").get_attribute("aria-invalid") == "true"
+
+        page.get_by_role("button", name="Reset values").click()
+
+        assert page.locator("#error-summary").is_hidden()
+        assert page.locator('[aria-invalid="true"]').count() == 0
+        assert errors == []
+    except Exception:
+        page.screenshot(path=browser_artifacts / "desktop-reset-failure.png", full_page=True)
         raise
     finally:
         page.close()
@@ -125,6 +207,19 @@ def test_full_editor_examples_rows_errors_and_keyboard_tabs(
         page.locator("#error-summary").wait_for(state="visible")
         assert "readings.0.temperature_c" in page.locator("#error-summary").inner_text()
         assert page.locator("#reading-0-temperature-c").get_attribute("aria-invalid") == "true"
+
+        page.evaluate("window.__forceValidationError = false")
+        page.get_by_role("button", name="Nominal example").click()
+        page.locator("#error-summary").wait_for(state="hidden")
+        assert page.locator('[aria-invalid="true"]').count() == 0
+
+        page.evaluate("window.__forceValidationError = true")
+        page.get_by_role("button", name="Validate & Analyze").click()
+        page.locator("#error-summary").wait_for(state="visible")
+        page.evaluate("window.__forceValidationError = false; window.__importCancelled = false")
+        page.get_by_role("button", name="Import JSON…").click()
+        page.locator("#error-summary").wait_for(state="hidden")
+        assert page.locator('[aria-invalid="true"]').count() == 0
 
         document_width = page.evaluate("document.documentElement.scrollWidth")
         overflowing = page.evaluate(

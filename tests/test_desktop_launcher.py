@@ -141,7 +141,7 @@ def test_native_message_uses_question_result(monkeypatch: pytest.MonkeyPatch) ->
             calls.append(args)
             return 6
 
-    monkeypatch.setattr(launcher.ctypes, "windll", SimpleNamespace(user32=User32()))
+    monkeypatch.setattr(launcher.ctypes, "windll", SimpleNamespace(user32=User32()), raising=False)
 
     assert launcher._native_message("Open the page?", question=True) is True
     assert calls[0][-1] == 0x34

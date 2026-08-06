@@ -7,7 +7,13 @@ const metricDefinitions = [
 ];
 
 const quickDefaults = { battery: 3.8, temperature: 25, signal: -80 };
-const state = { mode: "quick", analysisId: null, quickTimestamp: new Date().toISOString(), fullLoaded: false };
+const state = {
+  mode: "quick",
+  analysisId: null,
+  quickTimestamp: new Date().toISOString(),
+  fullLoaded: false,
+  inputRevision: 0,
+};
 
 const byId = (id) => document.getElementById(id);
 const quickFields = {
@@ -34,13 +40,25 @@ function setBusy(isBusy, message) {
   if (message) setBridgeStatus(message);
 }
 
-function invalidateResult(message = "Inputs changed. Validate again to refresh the report.") {
-  if (state.analysisId) setBridgeStatus(message);
+function clearResult() {
   state.analysisId = null;
   byId("result-panel").hidden = true;
   byId("report-preview").removeAttribute("srcdoc");
   byId("save-json").disabled = true;
   byId("save-report").disabled = true;
+}
+
+function discardStaleAnalysis() {
+  clearResult();
+  setBridgeStatus(
+    "Inputs changed while analysis was running. Validate again to analyze the current telemetry."
+  );
+}
+
+function invalidateResult(message = "Inputs changed. Validate again to refresh the report.") {
+  state.inputRevision += 1;
+  if (state.analysisId) setBridgeStatus(message);
+  clearResult();
 }
 
 function valueOrRaw(value) {
@@ -71,6 +89,7 @@ function pairQuickControl(name) {
 }
 
 function resetQuick() {
+  clearErrors();
   state.quickTimestamp = new Date().toISOString();
   Object.entries(quickDefaults).forEach(([name, value]) => {
     quickFields[name].range.value = String(value);
@@ -148,6 +167,7 @@ function renumberReadingRows() {
 }
 
 function setFullPayload(payload) {
+  clearErrors();
   byId("full-pass-id").value = payload.pass_id ?? "";
   byId("full-spacecraft").value = payload.spacecraft ?? "";
   byId("full-started-at").value = payload.started_at ?? "";
@@ -286,13 +306,22 @@ function renderResult(result) {
 async function analyseCurrent() {
   clearErrors();
   setBusy(true, "Validating and analyzing with Python…");
+  const submittedRevision = state.inputRevision;
   try {
     const payload = state.mode === "quick" ? quickPayload() : fullPayload();
     const result = await callBridge("analyse", JSON.stringify(payload));
+    if (submittedRevision !== state.inputRevision) {
+      discardStaleAnalysis();
+      return;
+    }
     if (!result.ok) showErrors(result);
     else renderResult(result);
   } catch (error) {
-    showErrors({ error: error.message, issues: [] });
+    if (submittedRevision !== state.inputRevision) {
+      discardStaleAnalysis();
+    } else {
+      showErrors({ error: error.message, issues: [] });
+    }
   } finally {
     setBusy(false);
   }
