@@ -14,6 +14,8 @@ Windows version, WebView2 version, date, and tester with the release evidence.
 - [ ] Confirm the unsigned-app/SmartScreen message is understandable after checksum verification.
 - [ ] Confirm the missing-WebView2 guidance is understandable, or record the installed runtime
       version when the application opens normally.
+- [ ] Close the application and confirm neither `debug.log` nor `chromium.log` was created beside
+      the executable or in the directory used to launch it.
 
 ## Quick Experiment boundaries
 
@@ -41,6 +43,8 @@ produced by the Python analysis result:
 
 ## Release decision
 
+- [ ] Confirm the public release was created only after the matching Windows Release workflow
+      completed and contains the versioned ZIP, checksum, and build-information assets.
 - [ ] Record all results and retain any screenshots or failing input needed to reproduce an issue.
 - [ ] If any required check fails, do not replace the published assets. Fix forward with the next
       patch version.

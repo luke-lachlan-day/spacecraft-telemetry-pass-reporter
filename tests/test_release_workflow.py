@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 
 _ROOT = Path(__file__).parents[1]
@@ -45,3 +46,11 @@ def test_release_workflow_rejects_browser_logs_outside_temporary_storage() -> No
     assert 'Join-Path $smokeDirectory "debug.log"' in workflow
     assert '"dist\\Telemetry Reporter\\debug.log"' in workflow
     assert "left browser logs outside temporary storage" in workflow
+
+
+def test_current_package_version_has_committed_release_notes() -> None:
+    pyproject = tomllib.loads((_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    version = pyproject["project"]["version"]
+
+    notes_path = _ROOT / "packaging" / "release" / "notes" / f"v{version}.md"
+    assert notes_path.is_file()
