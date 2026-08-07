@@ -242,13 +242,19 @@ command reproduces the checked-in anomalous report. A dedicated Chromium job che
 320, 375, and 1440 pixels, print media/PDF output, accessibility-oriented UI behavior, and browser
 errors. Screenshots and the PDF are uploaded as short-lived artifacts only when that job fails.
 
-The Windows release workflow calls the complete Quality workflow as a required gate. Only after the
-Python matrix, package smoke, and Chromium jobs pass does it use Windows x64 CPython 3.13.15 and the
-committed hash lock, verify the resolved environment with `pip check`, and build the committed
-one-folder PyInstaller specification. It runs both packaged diagnostic modes with process timeouts,
-verifies the ZIP checksum, and publishes a versioned ZIP, checksum, and build-information file.
-Published asset names are immutable: the workflow fails on a collision and never replaces an
-earlier release.
+Pushing a `v<package-version>` tag runs the Windows release workflow; manual dispatch performs the
+same validation and build but produces workflow artifacts only. The workflow calls the complete
+Quality workflow as a required gate. Only after the Python matrix, package smoke, and Chromium jobs
+pass does it use Windows x64 CPython 3.13.15 and the committed hash lock, verify the resolved
+environment with `pip check`, and build the committed one-folder PyInstaller specification. It runs
+both packaged diagnostic modes with process timeouts from a temporary working directory and rejects
+browser logs beside the application.
+
+After the packaged checks pass, the workflow verifies the ZIP checksum and uploads the versioned
+ZIP, checksum, and build-information file as workflow artifacts. Tag builds then create the GitHub
+Release with the committed version-specific notes and all three assets in one final operation. An
+existing release or draft causes publication to fail; automation never replaces or deletes earlier
+release assets.
 
 For a matching manual build, first confirm `py -3.13-64 --version` reports Python 3.13.15, then run:
 

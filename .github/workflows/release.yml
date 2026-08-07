@@ -2,8 +2,8 @@ name: Windows Release
 
 on:
   workflow_dispatch:
-  release:
-    types: [published]
+  push:
+    tags: ["v*"]
 
 permissions:
   contents: read
@@ -14,7 +14,6 @@ jobs:
 
   windows-x64:
     needs: quality-gate
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref_name, 'v')
     runs-on: windows-latest
     permissions:
       contents: write
@@ -46,9 +45,14 @@ jobs:
           }
 
           $expectedTag = "v$packageVersion"
-          $tagBuild = $env:GITHUB_EVENT_NAME -eq "release" -or $env:GITHUB_REF_TYPE -eq "tag"
+          $tagBuild = $env:GITHUB_REF_TYPE -eq "tag"
           if ($tagBuild -and $env:GITHUB_REF_NAME -ne $expectedTag) {
             throw "Git ref '$env:GITHUB_REF_NAME' does not match package version '$expectedTag'"
+          }
+
+          $releaseNotesPath = "packaging/release/notes/$expectedTag.md"
+          if ($tagBuild -and -not (Test-Path -LiteralPath $releaseNotesPath -PathType Leaf)) {
+            throw "Release notes are missing: $releaseNotesPath"
           }
 
           $archiveName = "spacecraft-telemetry-pass-reporter-$packageVersion-windows-x64.zip"
@@ -57,19 +61,7 @@ jobs:
           "RELEASE_TAG=$expectedTag" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "ARCHIVE_NAME=$archiveName" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "BUILD_INFO_NAME=$buildInfoName" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-
-      - name: Reject existing published assets
-        if: github.event_name == 'release'
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $existing = @(gh release view "$env:GITHUB_REF_NAME" --json assets --jq '.assets[].name')
-          $planned = @($env:ARCHIVE_NAME, "$env:ARCHIVE_NAME.sha256", $env:BUILD_INFO_NAME)
-          $collisions = @($planned | Where-Object { $_ -in $existing })
-          if ($collisions.Count -gt 0) {
-            throw "Release assets already exist and will not be replaced: $($collisions -join ', ')"
-          }
+          "RELEASE_NOTES_PATH=$releaseNotesPath" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Build portable application
         shell: pwsh
@@ -110,9 +102,14 @@ jobs:
       - name: Run packaged self-tests
         shell: pwsh
         run: |
+          $smokeDirectory = Join-Path $env:RUNNER_TEMP "telemetry-reporter-package-smoke"
+          $packagedExecutable = (Resolve-Path -LiteralPath "dist\Telemetry Reporter\Telemetry Reporter.exe").Path
+          New-Item -ItemType Directory -Path $smokeDirectory -Force | Out-Null
+
           function Invoke-PackagedTest([string] $argument) {
-            $process = Start-Process -FilePath "dist\Telemetry Reporter\Telemetry Reporter.exe" `
-              -ArgumentList $argument -PassThru -WindowStyle Hidden
+            $process = Start-Process -FilePath $packagedExecutable `
+              -ArgumentList $argument -PassThru -WindowStyle Hidden `
+              -WorkingDirectory $smokeDirectory
             if (-not $process.WaitForExit(60000)) {
               Stop-Process -Id $process.Id -Force
               throw "Packaged $argument timed out after 60 seconds"
@@ -123,6 +120,16 @@ jobs:
           }
           Invoke-PackagedTest "--self-test"
           Invoke-PackagedTest "--ui-smoke-test"
+
+          $unexpectedLogs = @(
+            (Join-Path $smokeDirectory "debug.log"),
+            (Join-Path $smokeDirectory "chromium.log"),
+            "dist\Telemetry Reporter\debug.log",
+            "dist\Telemetry Reporter\chromium.log"
+          ) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf }
+          if ($unexpectedLogs.Count -gt 0) {
+            throw "Packaged diagnostics left browser logs outside temporary storage: $($unexpectedLogs -join ', ')"
+          }
 
       - name: Create ZIP and checksum
         shell: pwsh
@@ -142,13 +149,16 @@ jobs:
           path: release-artifacts/*
           if-no-files-found: error
 
-      - name: Attach files to published release
-        if: github.event_name == 'release'
+      - name: Publish release after successful validation
+        if: github.ref_type == 'tag'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload "$env:GITHUB_REF_NAME" `
+          gh release create "$env:RELEASE_TAG" `
             "release-artifacts\$env:ARCHIVE_NAME" `
             "release-artifacts\$env:ARCHIVE_NAME.sha256" `
-            "release-artifacts\$env:BUILD_INFO_NAME"
+            "release-artifacts\$env:BUILD_INFO_NAME" `
+            --verify-tag `
+            --title "Spacecraft Telemetry Pass Reporter $env:PACKAGE_VERSION" `
+            --notes-file "$env:RELEASE_NOTES_PATH"
