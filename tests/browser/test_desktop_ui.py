@@ -34,6 +34,8 @@ def _stub_script(
       window.__importFailure = false;
       window.__holdImport = false;
       window.__releaseImport = null;
+      window.__saveFailure = false;
+      window.__saveCancelled = false;
       window.__heldExampleNames = [];
       window.__releaseExamples = {{}};
       window.__bridgeCalls = [];
@@ -106,10 +108,20 @@ def _stub_script(
         }},
         save_input_json: async (id) => {{
           window.__bridgeCalls.push(['save_input_json', id]);
+          if (window.__saveFailure) return {{
+            ok: false,
+            error: 'simulated input JSON save failure'
+          }};
+          if (window.__saveCancelled) return {{ ok: true, cancelled: true }};
           return {{ ok: true, cancelled: false, path: 'C:\\\\Reports\\\\input.json', id }};
         }},
         save_report: async (id) => {{
           window.__bridgeCalls.push(['save_report', id]);
+          if (window.__saveFailure) return {{
+            ok: false,
+            error: 'simulated HTML report save failure'
+          }};
+          if (window.__saveCancelled) return {{ ok: true, cancelled: true }};
           return {{ ok: true, cancelled: false, path: 'C:\\\\Reports\\\\report.html', id }};
         }}
       }} }};
@@ -403,16 +415,175 @@ def test_invalid_import_preserves_current_editor_and_analysis(
 
         page.evaluate("window.__importFailure = true")
         page.get_by_role("button", name="Import JSON…").click()
-        page.locator("#error-summary").wait_for(state="visible")
+        page.locator("#operation-error").wait_for(state="visible")
 
-        assert page.locator("#error-title").inner_text() == (
+        assert page.locator("#operation-error-title").inner_text() == (
             "The selected JSON could not be imported"
         )
         assert page.locator("#full-pass-id").input_value() == pass_id
         assert page.locator("#result-panel").is_visible()
         assert page.locator("#save-report").is_enabled()
         assert page.locator('[aria-invalid="true"]').count() == 0
-        assert page.locator("#error-summary a").count() == 0
+        assert page.locator("#error-summary").is_hidden()
+        assert page.locator("#operation-error a").count() == 0
+        assert errors == []
+    finally:
+        page.close()
+
+
+def test_invalid_import_preserves_existing_validation_feedback(
+    chromium_browser: Any,
+    valid_payload: dict[str, object],
+) -> None:
+    page, errors = _open_app(chromium_browser, valid_payload)
+    try:
+        page.get_by_role("tab", name="Full Pass Editor").click()
+        page.locator("#readings-body tr").first.wait_for()
+        page.evaluate("window.__forceValidationError = true")
+        page.get_by_role("button", name="Validate & Analyze").click()
+        page.locator("#error-summary").wait_for(state="visible")
+
+        validation_text = page.locator("#error-summary").inner_text()
+        validation_href = page.locator("#error-summary a").get_attribute("href")
+        assert page.locator("#reading-0-temperature-c").get_attribute("aria-invalid") == "true"
+
+        page.evaluate("window.__importFailure = true")
+        page.get_by_role("button", name="Import JSON…").click()
+        page.locator("#operation-error").wait_for(state="visible")
+
+        assert page.locator("#error-summary").inner_text() == validation_text
+        assert page.locator("#error-summary a").get_attribute("href") == validation_href
+        assert page.locator("#reading-0-temperature-c").get_attribute("aria-invalid") == "true"
+        assert page.locator("#operation-error-title").inner_text() == (
+            "The selected JSON could not be imported"
+        )
+        assert errors == []
+    finally:
+        page.close()
+
+
+@pytest.mark.parametrize(
+    ("button_name", "expected_title", "expected_error"),
+    [
+        (
+            "Save input JSON…",
+            "The input JSON could not be saved",
+            "simulated input JSON save failure",
+        ),
+        (
+            "Save HTML report…",
+            "The HTML report could not be saved",
+            "simulated HTML report save failure",
+        ),
+    ],
+)
+def test_save_failures_use_operational_feedback_and_preserve_analysis(
+    chromium_browser: Any,
+    valid_payload: dict[str, object],
+    button_name: str,
+    expected_title: str,
+    expected_error: str,
+) -> None:
+    page, errors = _open_app(chromium_browser, valid_payload)
+    try:
+        page.get_by_role("button", name="Validate & Analyze").click()
+        page.locator("#result-panel").wait_for(state="visible")
+        page.evaluate("window.__saveFailure = true")
+
+        page.get_by_role("button", name=button_name).click()
+        page.locator("#operation-error").wait_for(state="visible")
+
+        assert page.locator("#operation-error-title").inner_text() == expected_title
+        assert expected_error in page.locator("#operation-error").inner_text()
+        assert page.locator("#error-summary").is_hidden()
+        assert page.locator('[aria-invalid="true"]').count() == 0
+        assert page.locator("#result-panel").is_visible()
+        assert page.locator("#save-json").is_enabled()
+        assert page.locator("#save-report").is_enabled()
+
+        page.evaluate("window.__saveFailure = false")
+        page.get_by_role("button", name=button_name).click()
+        page.locator("#operation-error").wait_for(state="hidden")
+        assert "Saved to" in page.locator("#bridge-status").inner_text()
+        assert errors == []
+    finally:
+        page.close()
+
+
+def test_cancelled_save_clears_previous_operational_error(
+    chromium_browser: Any,
+    valid_payload: dict[str, object],
+) -> None:
+    page, errors = _open_app(chromium_browser, valid_payload)
+    try:
+        page.get_by_role("button", name="Validate & Analyze").click()
+        page.locator("#result-panel").wait_for(state="visible")
+        page.evaluate("window.__saveFailure = true")
+        page.get_by_role("button", name="Save HTML report…").click()
+        page.locator("#operation-error").wait_for(state="visible")
+
+        page.evaluate("window.__saveFailure = false; window.__saveCancelled = true")
+        page.get_by_role("button", name="Save HTML report…").click()
+
+        page.locator("#operation-error").wait_for(state="hidden")
+        assert "Save cancelled" in page.locator("#bridge-status").inner_text()
+        assert page.locator("#result-panel").is_visible()
+        assert errors == []
+    finally:
+        page.close()
+
+
+def test_full_editor_loads_maximum_readings_with_one_renumber_pass(
+    chromium_browser: Any,
+    valid_payload: dict[str, object],
+) -> None:
+    page, errors = _open_app(chromium_browser, valid_payload)
+    try:
+        page.get_by_role("tab", name="Full Pass Editor").click()
+        page.locator("#readings-body tr").first.wait_for()
+
+        result = page.evaluate(
+            """() => {
+              const payload = fullPayload();
+              const firstReading = payload.readings[0];
+              const startedAt = Date.parse(payload.started_at);
+              payload.readings = Array.from({ length: 10000 }, (_, index) => ({
+                ...firstReading,
+                timestamp: new Date(startedAt + index * 1000).toISOString(),
+              }));
+
+              const originalRenumber = window.renumberReadingRows;
+              let renumberCalls = 0;
+              window.renumberReadingRows = (...args) => {
+                renumberCalls += 1;
+                if (renumberCalls > 1) throw new Error('bulk load renumbered more than once');
+                return originalRenumber(...args);
+              };
+              try {
+                setFullPayload(payload);
+              } finally {
+                window.renumberReadingRows = originalRenumber;
+              }
+
+              const rows = document.querySelectorAll('#readings-body tr');
+              return {
+                renumberCalls,
+                rowCount: rows.length,
+                firstTimestampId: rows[0].querySelector('.reading-timestamp').id,
+                lastTimestampId: rows[rows.length - 1].querySelector('.reading-timestamp').id,
+                lastMetricId: rows[rows.length - 1]
+                  .querySelector('[data-metric-key="signal_strength_dbm"]').id,
+              };
+            }"""
+        )
+
+        assert result == {
+            "renumberCalls": 1,
+            "rowCount": 10_000,
+            "firstTimestampId": "reading-0-timestamp",
+            "lastTimestampId": "reading-9999-timestamp",
+            "lastMetricId": "reading-9999-signal-strength-dbm",
+        }
         assert errors == []
     finally:
         page.close()
@@ -444,11 +615,11 @@ def test_configuration_failure_is_fatal_and_keeps_analysis_disabled(
         configuration_error=True,
     )
     try:
-        page.locator("#error-summary").wait_for(state="visible")
+        page.locator("#operation-error").wait_for(state="visible")
         assert page.locator("#analyse-button").is_disabled()
         assert page.locator("#quick-grid > *").count() == 0
         assert "initialization failed" in page.locator("#bridge-status").inner_text().lower()
-        assert "simulated configuration failure" in page.locator("#error-summary").inner_text()
+        assert "simulated configuration failure" in page.locator("#operation-error").inner_text()
         assert errors == []
     finally:
         page.close()
@@ -464,9 +635,11 @@ def test_missing_configuration_bridge_method_is_fatal(
         missing_configuration_method=True,
     )
     try:
-        page.locator("#error-summary").wait_for(state="visible")
+        page.locator("#operation-error").wait_for(state="visible")
         assert page.locator("#analyse-button").is_disabled()
-        assert "Python desktop bridge is unavailable" in page.locator("#error-summary").inner_text()
+        assert (
+            "Python desktop bridge is unavailable" in page.locator("#operation-error").inner_text()
+        )
         assert errors == []
     finally:
         page.close()

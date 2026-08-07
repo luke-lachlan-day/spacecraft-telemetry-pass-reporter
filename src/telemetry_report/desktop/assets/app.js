@@ -113,7 +113,7 @@ function updateQuickOutput(key) {
 
 function resetQuick() {
   if (!state.initialized) return;
-  clearErrors();
+  clearAllErrors();
   state.quickTimestamp = new Date().toISOString();
   metricDefinitions.forEach((metric) => {
     const field = quickFields[metric.key];
@@ -188,7 +188,7 @@ function escapeAttribute(value) {
     .replaceAll(">", "&gt;");
 }
 
-function addReadingRow(reading = {}, afterIndex = null) {
+function createReadingRow(reading = {}) {
   const row = document.createElement("tr");
   const metricCells = metricDefinitions.map((metric) => `
     <td><label class="sr-only">${metric.label}</label><input class="reading-metric" data-metric-key="${metric.key}" type="text" inputmode="decimal" value="${escapeAttribute(readingValue(reading, metric.key))}"></td>`).join("");
@@ -196,6 +196,11 @@ function addReadingRow(reading = {}, afterIndex = null) {
     <td><label class="sr-only">Reading timestamp</label><input class="reading-timestamp" type="text" spellcheck="false" value="${escapeAttribute(readingValue(reading, "timestamp"))}"></td>
     ${metricCells}
     <td><div class="row-actions"><button class="icon-button duplicate" type="button" title="Duplicate reading">Duplicate</button><button class="icon-button delete" type="button" title="Delete reading">Delete</button></div></td>`;
+  return row;
+}
+
+function addReadingRow(reading = {}, afterIndex = null) {
+  const row = createReadingRow(reading);
   const body = byId("readings-body");
   if (afterIndex === null || afterIndex >= body.children.length - 1) body.append(row);
   else body.insertBefore(row, body.children[afterIndex + 1]);
@@ -217,7 +222,7 @@ function renumberReadingRows() {
 }
 
 function setFullPayload(payload) {
-  clearErrors();
+  clearAllErrors();
   byId("full-pass-id").value = payload.pass_id ?? "";
   byId("full-spacecraft").value = payload.spacecraft ?? "";
   byId("full-started-at").value = payload.started_at ?? "";
@@ -227,8 +232,10 @@ function setFullPayload(payload) {
     byId(`limit-${metric.slug}-warning`).value = limit.warning;
     byId(`limit-${metric.slug}-critical`).value = limit.critical;
   });
-  byId("readings-body").replaceChildren();
-  (payload.readings || []).forEach((reading) => addReadingRow(reading));
+  const fragment = document.createDocumentFragment();
+  (payload.readings || []).forEach((reading) => fragment.append(createReadingRow(reading)));
+  byId("readings-body").replaceChildren(fragment);
+  renumberReadingRows();
   state.fullLoaded = true;
   invalidateResult("Telemetry loaded. Validate when ready.");
 }
@@ -269,7 +276,7 @@ function switchMode(mode) {
   byId("full-tab").setAttribute("aria-selected", String(!quick));
   byId("quick-tab").tabIndex = quick ? 0 : -1;
   byId("full-tab").tabIndex = quick ? -1 : 0;
-  clearErrors();
+  clearAllErrors();
   invalidateResult("Mode changed. Validate the visible telemetry when ready.");
   if (!quick && !state.fullLoaded) loadExample("nominal");
 }
@@ -321,72 +328,86 @@ function fieldTargetsForPath(path) {
   return { focusId: "analyse-button", invalidIds: [] };
 }
 
-function clearErrors() {
+function clearValidationErrors() {
   byId("error-title").textContent = "Please correct the highlighted telemetry";
   byId("error-summary").hidden = true;
   byId("error-list").replaceChildren();
   document.querySelectorAll('[aria-invalid="true"]').forEach((element) => element.removeAttribute("aria-invalid"));
 }
 
-function showErrorSummary(result, { title, status, linkFields }) {
-  clearErrors();
-  byId("error-title").textContent = title;
-  const issues = Array.isArray(result.issues) && result.issues.length
+function clearOperationalError() {
+  byId("operation-error-title").textContent = "The operation could not be completed";
+  byId("operation-error").hidden = true;
+  byId("operation-error-list").replaceChildren();
+}
+
+function clearAllErrors() {
+  clearValidationErrors();
+  clearOperationalError();
+}
+
+function issuesFor(result) {
+  return Array.isArray(result.issues) && result.issues.length
     ? result.issues
     : [{ path: "input", message: result.error || "The telemetry could not be analysed." }];
+}
+
+function showErrors(result) {
+  clearAllErrors();
+  const issues = issuesFor(result);
   issues.forEach((issue) => {
+    const targets = fieldTargetsForPath(issue.path);
+    targets.invalidIds.forEach((id) => {
+      const target = byId(id);
+      if (target) target.setAttribute("aria-invalid", "true");
+    });
     const item = document.createElement("li");
-    if (linkFields) {
-      const targets = fieldTargetsForPath(issue.path);
-      targets.invalidIds.forEach((id) => {
-        const target = byId(id);
-        if (target) target.setAttribute("aria-invalid", "true");
-      });
-      const link = document.createElement("a");
-      link.href = `#${targets.focusId}`;
-      link.textContent = `${issue.path}: ${issue.message}`;
-      item.append(link);
-    } else {
-      item.textContent = `${issue.path}: ${issue.message}`;
-    }
+    const link = document.createElement("a");
+    link.href = `#${targets.focusId}`;
+    link.textContent = `${issue.path}: ${issue.message}`;
+    item.append(link);
     byId("error-list").append(item);
   });
   byId("error-summary").hidden = false;
   byId("error-summary").focus();
-  setBridgeStatus(status);
+  setBridgeStatus("Validation found fields that need attention.");
 }
 
-function showErrors(result) {
-  showErrorSummary(result, {
-    title: "Please correct the highlighted telemetry",
-    status: "Validation found fields that need attention.",
-    linkFields: true,
+function showOperationalError(result, { title, status }) {
+  clearOperationalError();
+  byId("operation-error-title").textContent = title;
+  issuesFor(result).forEach((issue) => {
+    const item = document.createElement("li");
+    item.textContent = `${issue.path}: ${issue.message}`;
+    byId("operation-error-list").append(item);
   });
+  byId("operation-error").hidden = false;
+  byId("operation-error").focus();
+  setBridgeStatus(status);
 }
 
 function showLoadErrors(result, kind) {
   const example = kind === "example";
-  showErrorSummary(result, {
+  showOperationalError(result, {
     title: example
       ? "The bundled example could not be loaded"
       : "The selected JSON could not be imported",
     status: example
       ? "Example loading failed. The current editor and analysis are unchanged."
       : "Import failed. The current editor and analysis are unchanged.",
-    linkFields: false,
   });
 }
 
 function showInitializationError(error) {
-  clearErrors();
-  byId("error-title").textContent = "The desktop application could not initialize";
-  const item = document.createElement("li");
-  item.textContent = error.message || String(error);
-  byId("error-list").append(item);
-  byId("error-summary").hidden = false;
-  byId("error-summary").focus();
+  clearValidationErrors();
+  showOperationalError(
+    { error: error.message || String(error), issues: [] },
+    {
+      title: "The desktop application could not initialize",
+      status: "Initialization failed. Restart the application or reinstall the complete bundle.",
+    },
+  );
   byId("analyse-button").disabled = true;
-  setBridgeStatus("Initialization failed. Restart the application or reinstall the complete bundle.");
 }
 
 function renderResult(result) {
@@ -422,7 +443,7 @@ function renderResult(result) {
 
 async function analyseCurrent() {
   if (!state.initialized) return;
-  clearErrors();
+  clearAllErrors();
   clearResult();
   setBusy(true, "Validating and analyzing with Python…");
   const submittedRevision = state.inputRevision;
@@ -457,6 +478,7 @@ function editorRequestIsCurrent(request) {
 
 async function loadExample(name) {
   const request = beginEditorRequest();
+  clearOperationalError();
   setBridgeStatus(`Loading ${name} example…`);
   try {
     const result = await callBridge("load_example", name);
@@ -472,6 +494,7 @@ async function loadExample(name) {
 
 async function importJson() {
   const request = beginEditorRequest();
+  clearOperationalError();
   setBridgeStatus("Opening telemetry JSON…");
   try {
     const result = await callBridge("open_input_json");
@@ -492,13 +515,31 @@ async function importJson() {
 async function save(kind) {
   if (!state.analysisId) return;
   const method = kind === "json" ? "save_input_json" : "save_report";
-  setBridgeStatus(`Choosing where to save the ${kind === "json" ? "input JSON" : "HTML report"}…`);
+  const label = kind === "json" ? "input JSON" : "HTML report";
+  clearOperationalError();
+  setBridgeStatus(`Choosing where to save the ${label}…`);
   try {
     const result = await callBridge(method, state.analysisId);
-    if (!result.ok) showErrors({ error: result.error, issues: [] });
+    if (!result.ok) {
+      showOperationalError(
+        { error: result.error, issues: [] },
+        {
+          title: `The ${label} could not be saved`,
+          status: "Save failed. The current analysis remains available.",
+        },
+      );
+    }
     else if (result.cancelled) setBridgeStatus("Save cancelled; the current analysis is still available.");
     else setBridgeStatus(`Saved to ${result.path}`);
-  } catch (error) { showErrors({ error: error.message, issues: [] }); }
+  } catch (error) {
+    showOperationalError(
+      { error: error.message, issues: [] },
+      {
+        title: `The ${label} could not be saved`,
+        status: "Save failed. The current analysis remains available.",
+      },
+    );
+  }
 }
 
 function bindEvents() {
