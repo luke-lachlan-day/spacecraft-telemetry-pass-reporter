@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import argparse
 import ctypes
+import os
 import sys
 import webbrowser
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from importlib.resources import as_file, files
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from threading import Event
 from typing import Any
 
@@ -22,6 +25,7 @@ from telemetry_report.services import analyse_pass
 _WEBVIEW2_DOWNLOAD_URL = "https://developer.microsoft.com/microsoft-edge/webview2/"
 _WEBVIEW2_CLIENT_ID = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
 _UI_SMOKE_TIMEOUT_SECONDS = 20.0
+_CHROMIUM_LOG_ENVIRONMENT = "CHROME_LOG_FILE"
 _UI_SMOKE_SCRIPT = """
 (async () => {
   await initializeApp();
@@ -55,6 +59,24 @@ class UiSmokeResult:
     """Result shared between pywebview's smoke thread and the launcher."""
 
     error: str | None = None
+
+
+@contextmanager
+def _temporary_chromium_log() -> Iterator[None]:
+    """Keep incidental Chromium logging out of the launch directory."""
+    if _CHROMIUM_LOG_ENVIRONMENT in os.environ:
+        yield
+        return
+
+    with TemporaryDirectory(
+        prefix="telemetry-reporter-webview-",
+        ignore_cleanup_errors=True,
+    ) as temporary_directory:
+        os.environ[_CHROMIUM_LOG_ENVIRONMENT] = str(Path(temporary_directory) / "chromium.log")
+        try:
+            yield
+        finally:
+            os.environ.pop(_CHROMIUM_LOG_ENVIRONMENT, None)
 
 
 class PywebviewDialogs(DesktopDialogs):
@@ -254,15 +276,16 @@ def _launch_gui(*, smoke_test: bool = False) -> int:
             if window is None:
                 raise RuntimeError("pywebview did not create a desktop window")
             bridge.bind_dialogs(PywebviewDialogs(window, webview))
-            if smoke_test:
-                webview.start(
-                    _run_ui_smoke,
-                    (window, smoke_result),
-                    gui="edgechromium",
-                    private_mode=True,
-                )
-            else:
-                webview.start(gui="edgechromium", private_mode=True)
+            with _temporary_chromium_log():
+                if smoke_test:
+                    webview.start(
+                        _run_ui_smoke,
+                        (window, smoke_result),
+                        gui="edgechromium",
+                        private_mode=True,
+                    )
+                else:
+                    webview.start(gui="edgechromium", private_mode=True)
     except Exception as error:
         if smoke_test:
             message = f"Desktop UI smoke test could not start: {error}"

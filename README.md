@@ -40,8 +40,9 @@ never falls back to the deprecated MSHTML renderer.
 
 The portable release is unsigned. Windows SmartScreen may show an unrecognized-app warning, so
 verify the published SHA-256 checksum before choosing to run it. There is no installer,
-auto-updater, account, network service, telemetry collection, or persistence beyond files you
-explicitly save.
+auto-updater, account, network service, or telemetry collection. Imported telemetry and analysis
+state are not retained unless you explicitly save them. WebView2 uses private, OS-temporary runtime
+data and may write transient diagnostics there; normal shutdown removes those temporary files.
 
 ![Quick Experiment in the packaged Windows application](docs/images/telemetry-reporter-quick.png)
 

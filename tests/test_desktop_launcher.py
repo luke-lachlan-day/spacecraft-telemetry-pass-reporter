@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import builtins
+import os
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -54,6 +55,7 @@ def _fake_webview(window: FakeWindow, *, fail_start: bool = False) -> ModuleType
     module.FileDialog = SimpleNamespace(OPEN="open", SAVE="save")
     module.created = []
     module.started = []
+    module.chromium_log_files = []
 
     def create_window(title: str, **kwargs: object) -> FakeWindow:
         module.created.append((title, kwargs))
@@ -65,6 +67,7 @@ def _fake_webview(window: FakeWindow, *, fail_start: bool = False) -> ModuleType
         **kwargs: object,
     ) -> None:
         module.started.append(kwargs)
+        module.chromium_log_files.append(os.environ.get("CHROME_LOG_FILE"))
         if fail_start:
             raise RuntimeError("simulated WebView startup failure")
         if function is not None:
@@ -111,6 +114,35 @@ def test_pywebview_dialog_adapter_maps_native_results(tmp_path: Path) -> None:
             {"allow_multiple": False, "file_types": ("Telemetry JSON (*.json)",)},
         ),
     ]
+
+
+def test_temporary_chromium_log_redirects_and_cleans_up(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(launcher._CHROMIUM_LOG_ENVIRONMENT, raising=False)
+    temporary_root: Path
+
+    with launcher._temporary_chromium_log():
+        log_path = Path(os.environ[launcher._CHROMIUM_LOG_ENVIRONMENT])
+        temporary_root = log_path.parent
+        assert log_path.name == "chromium.log"
+        log_path.write_text("simulated Chromium diagnostic", encoding="utf-8")
+
+    assert launcher._CHROMIUM_LOG_ENVIRONMENT not in os.environ
+    assert not temporary_root.exists()
+
+
+def test_temporary_chromium_log_preserves_caller_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    configured_path = tmp_path / "caller-owned.log"
+    monkeypatch.setenv(launcher._CHROMIUM_LOG_ENVIRONMENT, str(configured_path))
+
+    with launcher._temporary_chromium_log():
+        assert os.environ[launcher._CHROMIUM_LOG_ENVIRONMENT] == str(configured_path)
+
+    assert os.environ[launcher._CHROMIUM_LOG_ENVIRONMENT] == str(configured_path)
 
 
 def test_runtime_detection_skips_non_windows(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -226,9 +258,15 @@ def test_launch_gui_forces_edgechromium_and_binds_bridge(
     monkeypatch.setattr(launcher.sys, "platform", "win32")
     monkeypatch.setattr(launcher, "_webview2_runtime_version", lambda: "123")
     monkeypatch.setitem(sys.modules, "webview", module)
+    monkeypatch.delenv(launcher._CHROMIUM_LOG_ENVIRONMENT, raising=False)
 
     assert launcher._launch_gui() == 0
     assert module.started == [{"gui": "edgechromium", "private_mode": True}]
+    chromium_log = module.chromium_log_files[0]
+    assert chromium_log is not None
+    assert Path(chromium_log).name == "chromium.log"
+    assert not Path(chromium_log).parent.exists()
+    assert launcher._CHROMIUM_LOG_ENVIRONMENT not in os.environ
     title, options = module.created[0]
     assert title == "Spacecraft Telemetry Pass Reporter"
     assert options["min_size"] == (720, 640)
@@ -244,9 +282,14 @@ def test_launch_gui_surfaces_startup_failure(monkeypatch: pytest.MonkeyPatch) ->
         launcher, "_native_message", lambda message, **_kwargs: messages.append(message) or False
     )
     monkeypatch.setitem(sys.modules, "webview", module)
+    monkeypatch.delenv(launcher._CHROMIUM_LOG_ENVIRONMENT, raising=False)
 
     assert launcher._launch_gui() == 3
     assert "simulated WebView startup failure" in messages[0]
+    assert launcher._CHROMIUM_LOG_ENVIRONMENT not in os.environ
+    chromium_log = module.chromium_log_files[0]
+    assert chromium_log is not None
+    assert not Path(chromium_log).parent.exists()
 
 
 def test_ui_smoke_test_uses_offscreen_window_and_cleans_up(
