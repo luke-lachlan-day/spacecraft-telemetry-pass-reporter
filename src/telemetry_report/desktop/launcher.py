@@ -159,7 +159,9 @@ def _validate_packaged_static_files() -> None:
         return
     executable_directory = Path(sys.executable).resolve().parent
     missing = [
-        name for name in ("LICENSE", "README.txt") if not (executable_directory / name).is_file()
+        name
+        for name in ("LICENSE", "README.txt", "Telemetry Reporter.exe.config")
+        if not (executable_directory / name).is_file()
     ]
     if missing:
         raise RuntimeError(f"packaged static files are missing: {', '.join(missing)}")

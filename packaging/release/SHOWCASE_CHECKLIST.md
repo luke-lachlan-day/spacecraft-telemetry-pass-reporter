@@ -6,11 +6,16 @@ Windows version, WebView2 version, date, and tester with the release evidence.
 
 ## Download and startup
 
-- [ ] Download the versioned ZIP, `.sha256`, and build-information assets from the same release.
+- [ ] Download the versioned ZIP, `.sha256`, and build-information assets from the same release
+      using a web browser.
 - [ ] Calculate the ZIP SHA-256 and confirm it exactly matches the published checksum.
 - [ ] Confirm the build-information tag and commit are the intended release source.
-- [ ] Extract the entire ZIP and keep `Telemetry Reporter.exe` beside `_internal`, `LICENSE`,
+- [ ] Without selecting **Unblock** in the ZIP Properties window, extract the entire ZIP using
+      Windows Explorer.
+- [ ] Keep `Telemetry Reporter.exe` beside `_internal`, `Telemetry Reporter.exe.config`, `LICENSE`,
       `README.txt`, and `BUILD-INFO.txt`.
+- [ ] Double-click `Telemetry Reporter.exe` and confirm it reaches the Quick Experiment without a
+      `Python.Runtime.Loader.Initialize` or managed-assembly loading error.
 - [ ] Confirm the unsigned-app/SmartScreen message is understandable after checksum verification.
 - [ ] Confirm the missing-WebView2 guidance is understandable, or record the installed runtime
       version when the application opens normally.
@@ -43,8 +48,10 @@ produced by the Python analysis result:
 
 ## Release decision
 
-- [ ] Confirm the public release was created only after the matching Windows Release workflow
-      completed and contains the versioned ZIP, checksum, and build-information assets.
+- [ ] Confirm the matching Windows Release workflow completed successfully and its final publication
+      step created the public release only after validation, packaged tests, checksum creation, and
+      workflow-artifact upload succeeded.
+- [ ] Confirm the release contains the versioned ZIP, checksum, and build-information assets.
 - [ ] Record all results and retain any screenshots or failing input needed to reproduce an issue.
 - [ ] If any required check fails, do not replace the published assets. Fix forward with the next
       patch version.

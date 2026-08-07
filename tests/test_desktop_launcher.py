@@ -386,6 +386,7 @@ def test_packaged_static_file_check_accepts_complete_bundle(
 ) -> None:
     (tmp_path / "LICENSE").write_text("license", encoding="utf-8")
     (tmp_path / "README.txt").write_text("readme", encoding="utf-8")
+    (tmp_path / "Telemetry Reporter.exe.config").write_text("config", encoding="utf-8")
     monkeypatch.setattr(launcher.sys, "frozen", True, raising=False)
     monkeypatch.setattr(launcher.sys, "executable", str(tmp_path / "Telemetry Reporter.exe"))
 
@@ -399,7 +400,10 @@ def test_packaged_static_file_check_reports_missing_files(
     monkeypatch.setattr(launcher.sys, "frozen", True, raising=False)
     monkeypatch.setattr(launcher.sys, "executable", str(tmp_path / "Telemetry Reporter.exe"))
 
-    with pytest.raises(RuntimeError, match=r"LICENSE, README\.txt"):
+    with pytest.raises(
+        RuntimeError,
+        match=r"LICENSE, README\.txt, Telemetry Reporter\.exe\.config",
+    ):
         launcher._validate_packaged_static_files()
 
 

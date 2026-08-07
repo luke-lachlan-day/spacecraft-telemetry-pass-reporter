@@ -22,8 +22,8 @@ For the simplest route, open the
 and download the versioned `spacecraft-telemetry-pass-reporter-*-windows-x64.zip` file and its
 matching `.sha256` file. The versioned `*-build-info.txt` asset records the source commit, build
 platform, locked-input hash, and resolved package versions. Verify the checksum, extract the whole
-ZIP, and run `Telemetry Reporter.exe`; the adjacent `_internal` folder must remain in place. Python
-is not required.
+ZIP with Windows Explorer, and run `Telemetry Reporter.exe`; the adjacent `_internal` folder and
+`Telemetry Reporter.exe.config` file must remain in place. Python is not required.
 
 On PowerShell, this prints a hash that should match the first value in the downloaded `.sha256`
 file:
@@ -43,6 +43,12 @@ verify the published SHA-256 checksum before choosing to run it. There is no ins
 auto-updater, account, network service, or telemetry collection. Imported telemetry and analysis
 state are not retained unless you explicitly save them. WebView2 uses private, OS-temporary runtime
 data and may write transient diagnostics there; normal shutdown removes those temporary files.
+
+If Windows nevertheless reports that `Python.Runtime.Loader.Initialize` could not be resolved,
+close the application and verify the checksum again. As a fallback, right-click the original ZIP,
+open **Properties**, select **Unblock**, apply the change, and extract a fresh copy. Normal Explorer
+extraction should not require this workaround; please report the release version and Windows version
+if it does.
 
 ![Quick Experiment in the packaged Windows application](docs/images/telemetry-reporter-quick.png)
 
@@ -248,7 +254,8 @@ Quality workflow as a required gate. Only after the Python matrix, package smoke
 pass does it use Windows x64 CPython 3.13.15 and the committed hash lock, verify the resolved
 environment with `pip check`, and build the committed one-folder PyInstaller specification. It runs
 both packaged diagnostic modes with process timeouts from a temporary working directory and rejects
-browser logs beside the application.
+browser logs beside the application. It then applies Windows Mark-of-the-Web metadata to a temporary
+copy of the finished bundle and repeats both diagnostics, including the real WebView2 path.
 
 After the packaged checks pass, the workflow verifies the ZIP checksum and uploads the versioned
 ZIP, checksum, and build-information file as workflow artifacts. Tag builds then create the GitHub

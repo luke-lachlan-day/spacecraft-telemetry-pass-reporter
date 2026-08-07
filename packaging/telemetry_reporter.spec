@@ -70,3 +70,7 @@ bundle = COLLECT(
 bundle_root = Path(DISTPATH) / "Telemetry Reporter"
 copy2(repository_root / "LICENSE", bundle_root / "LICENSE")
 copy2(repository_root / "packaging" / "release" / "README.txt", bundle_root / "README.txt")
+copy2(
+    repository_root / "packaging" / "release" / "Telemetry Reporter.exe.config",
+    bundle_root / "Telemetry Reporter.exe.config",
+)
